@@ -59,17 +59,11 @@ The consolidated final file combining all milestones with the complete set of lo
 
 ## Running the Verifier
 
-To verify any milestone with VerCors:
+To verify any milestone with VerCors (after installing VerCors):
 
 ```bash
-vercors --silicon milestone5.pvl
+vct milestone5.pvl
 ```
 
 Replace `milestone5.pvl` with whichever file you want to check.
 
-## Key VerCors Concepts Used
-
-- **`context_everywhere`** — propagates a condition into every loop automatically; used for read-only array permissions and structural graph invariants.
-- **`context Perm(arr[*], 1)`** — full write permission for mutable arrays; stated as `context` (not `context_everywhere`) because array values change.
-- **`loop_invariant`** — re-establishes permissions and value invariants at each loop iteration; loop invariants can only redistribute permissions the method already holds.
-- **Trigger hints `{: expr :}`** — guide the SMT solver when reasoning about universally quantified expressions over arrays.
