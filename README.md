@@ -52,7 +52,7 @@ Adds the outer `while (any_open)` loop and the inner node-scanning loop (lines 9
 Fills in the child loop (lines 12–21): accepting cycle detection (early `return true`), first-visit handling of red nodes, atomic `p` update via `imax`, and the three interruption cases.
 
 ### Milestone 5 — Post-processing (`milestone5.pvl`)
-Adds the post-processing phase (lines 22–28): checking whether `F` is non-empty, reopening interrupted active nodes, retiring others, and resetting `p`. This is the complete algorithm.
+Adds the post-processing phase (lines 22–28): checking whether `F` is non-empty, reopening interrupted active nodes, retiring others, and resetting `p`. This is the complete algorithm with memory safety verified.
 
 ### Final — Full Verified Version (`hitchhiking.pvl`)
 The consolidated final file combining all milestones with the complete set of loop invariants needed for VerCors to verify memory safety.
