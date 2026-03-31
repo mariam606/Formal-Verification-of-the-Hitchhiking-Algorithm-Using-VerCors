@@ -1,0 +1,88 @@
+// Milestone 1: The skeleton — the full contract is in place, the body is empty
+pure int imax(int a, int b) = a > b ? a : b;
+
+// Verification of the Hitchhiking algorithm  in PVL
+//
+// Graph is in CSR (Compressed Sparse Row) format:
+//   R[u]  = start index in C for node u's neighbours
+//   R[u+1]= one-past-end index,  deg[u] = R[u+1] - R[u]
+//
+// Sets O / A / F are represented as boolean flag arrays:
+//   in_open[v]        == 1  iff  v in O
+//   in_active[v]      == 1  iff  v in A
+//   in_interrupted[v] == 1  iff  v in F
+// BOTTOM  = -2  (p value: state never reached)
+// EPSILON = -1  (p value: reached, but no accepting predecessor)
+// ---------------------------------------------------------------
+
+// ── context_everywhere ──────────────────────────────────────────
+context_everywhere p              != null;
+context_everywhere in_open        != null;
+context_everywhere in_active      != null;
+context_everywhere in_interrupted != null;
+context_everywhere roots          != null;
+context_everywhere deg            != null;
+context_everywhere is_red         != null;
+context_everywhere R              != null;
+context_everywhere C              != null;
+context_everywhere num_nodes > 0;
+context_everywhere num_roots > 0;
+context_everywhere p.length              == num_nodes;
+context_everywhere in_open.length        == num_nodes;
+context_everywhere in_active.length      == num_nodes;
+context_everywhere in_interrupted.length == num_nodes;
+context_everywhere roots.length          == num_roots;
+context_everywhere deg.length            == num_nodes;
+context_everywhere is_red.length         == num_nodes;
+context_everywhere R.length              == num_nodes + 1;
+
+// Read-only array permissions
+context_everywhere Perm(roots[*], 1\2);
+context_everywhere Perm(deg[*],   1\2);
+context_everywhere Perm(is_red[*],1\2);
+context_everywhere Perm(R[*],     1\2);
+context_everywhere Perm(C[*],     1\2);
+
+// CSR structural invariants
+context_everywhere R[0] == 0;
+context_everywhere C.length == R[num_nodes];
+context_everywhere (\forall int u; 0 <= u && u < num_nodes;
+                        R[u+1] - {:R[u]:} == {:deg[u]:});
+context_everywhere (\forall int u; 0 <= u && u < num_nodes; 0 <= {:deg[u]:});
+context_everywhere (\forall int u; 0 <= u && u <= num_nodes;
+                        0 <= {:R[u]:} && R[u] <= C.length);
+context_everywhere (\forall int i; 0 <= i && i < C.length;
+                        0 <= {:C[i]:} && C[i] < num_nodes);
+context_everywhere (\forall int i; 0 <= i && i < num_roots;
+                        0 <= {:roots[i]:} && roots[i] < num_nodes);
+context_everywhere (\forall int v; 0 <= v && v < num_nodes;
+                        {:is_red[v]:} == 0 || is_red[v] == 1);
+
+// ── Mutable array permissions ────────────────────────────────────
+context Perm(p[*],              1);
+context Perm(in_open[*],        1);
+context Perm(in_active[*],      1);
+context Perm(in_interrupted[*], 1);
+
+// ── Initial state ────────────────────────────────────────────────
+requires (\forall int v; 0 <= v && v < num_nodes; {:p[v]:}             == -2);
+requires (\forall int v; 0 <= v && v < num_nodes; {:in_open[v]:}        == 0);
+requires (\forall int v; 0 <= v && v < num_nodes; {:in_active[v]:}      == 0);
+requires (\forall int v; 0 <= v && v < num_nodes; {:in_interrupted[v]:} == 0);
+
+bool hitchhiking(
+    int num_nodes,
+    int num_roots,
+    int[] roots,
+    int[] deg,
+    int[] is_red,
+    int[] R,
+    int[] C,
+    int[] p,
+    int[] in_open,
+    int[] in_active,
+    int[] in_interrupted
+) {
+    // Milestone 1: skeleton only
+    return false;
+}
