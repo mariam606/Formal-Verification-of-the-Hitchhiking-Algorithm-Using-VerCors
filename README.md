@@ -116,7 +116,7 @@ Together they witness: `child` is red, the path stored for `node` starts at `chi
 To verify any milestone with VerCors:
 
 ```bash
-vercors --silicon milestone5.pvl
+vct milestone5.pvl
 ```
 
 Replace `milestone5.pvl` with whichever file you want to check.
