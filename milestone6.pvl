@@ -1,0 +1,274 @@
+// The first condition of the soundness proof, proving that the child is a red node.
+pure int imax(int a, int b) = a > b ? a : b;
+
+// Verification of the Hitchhiking algorithm  in PVL
+//
+// Graph is in CSR (Compressed Sparse Row) format:
+//   R[u]  = start index in C for node u's neighbours
+//   R[u+1]= one-past-end index,  deg[u] = R[u+1] - R[u]
+//
+// Sets O / A / F are represented as boolean flag arrays:
+//   in_open[v]        == 1  iff  v in O
+//   in_active[v]      == 1  iff  v in A
+//   in_interrupted[v] == 1  iff  v in F
+// BOTTOM  = -2  (p value: state never reached)
+// EPSILON = -1  (p value: reached, but no accepting predecessor)
+// ---------------------------------------------------------------
+
+// ── context_everywhere ──────────────────────────────────────────
+context_everywhere p              != null;
+context_everywhere in_open        != null;
+context_everywhere in_active      != null;
+context_everywhere in_interrupted != null;
+context_everywhere roots          != null;
+context_everywhere deg            != null;
+context_everywhere is_red         != null;
+context_everywhere R              != null;
+context_everywhere C              != null;
+context_everywhere num_nodes > 0;
+context_everywhere num_roots > 0;
+context_everywhere p.length              == num_nodes;
+context_everywhere in_open.length        == num_nodes;
+context_everywhere in_active.length      == num_nodes;
+context_everywhere in_interrupted.length == num_nodes;
+context_everywhere roots.length          == num_roots;
+context_everywhere deg.length            == num_nodes;
+context_everywhere is_red.length         == num_nodes;
+context_everywhere R.length              == num_nodes + 1;
+
+// Read-only array permissions
+context_everywhere Perm(roots[*], 1\2);
+context_everywhere Perm(deg[*],   1\2);
+context_everywhere Perm(is_red[*],1\2);
+context_everywhere Perm(R[*],     1\2);
+context_everywhere Perm(C[*],     1\2);
+
+// CSR structural invariants
+context_everywhere R[0] == 0;
+context_everywhere C.length == R[num_nodes];
+context_everywhere (\forall int u; 0 <= u && u < num_nodes;
+                        R[u+1] - {:R[u]:} == {:deg[u]:});
+context_everywhere (\forall int u; 0 <= u && u < num_nodes; 0 <= {:deg[u]:});
+context_everywhere (\forall int u; 0 <= u && u <= num_nodes;
+                        0 <= {:R[u]:} && R[u] <= C.length);
+context_everywhere (\forall int i; 0 <= i && i < C.length;
+                        0 <= {:C[i]:} && C[i] < num_nodes);
+context_everywhere (\forall int i; 0 <= i && i < num_roots;
+                        0 <= {:roots[i]:} && roots[i] < num_nodes);
+context_everywhere (\forall int v; 0 <= v && v < num_nodes;
+                        {:is_red[v]:} == 0 || is_red[v] == 1);
+
+// ── Mutable array permissions ────────────────────────────────────
+context Perm(p[*],              1);
+context Perm(in_open[*],        1);
+context Perm(in_active[*],      1);
+context Perm(in_interrupted[*], 1);
+
+// ── Initial state ────────────────────────────────────────────────
+requires (\forall int v; 0 <= v && v < num_nodes; {:p[v]:}             == -2);
+requires (\forall int v; 0 <= v && v < num_nodes; {:in_open[v]:}        == 0);
+requires (\forall int v; 0 <= v && v < num_nodes; {:in_active[v]:}      == 0);
+requires (\forall int v; 0 <= v && v < num_nodes; {:in_interrupted[v]:} == 0);
+
+bool hitchhiking(
+    int num_nodes,
+    int num_roots,
+    int[] roots,
+    int[] deg,
+    int[] is_red,
+    int[] R,
+    int[] C,
+    int[] p,
+    int[] in_open,
+    int[] in_active,
+    int[] in_interrupted
+) {
+    // ── Seed loop — lines 5-8 ────────────────────────
+    int ri = 0;
+    loop_invariant Perm(p[*],         1);
+    loop_invariant Perm(in_open[*],   1);
+    loop_invariant Perm(in_active[*], 1);
+    loop_invariant 0 <= ri && ri <= num_roots;
+    loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                        {:p[v]:} == -2 || p[v] == -1 || (0 <= p[v] && p[v] < num_nodes));
+    loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                        (0 <= {:p[v]:} && p[v] < num_nodes) ==> is_red[p[v]] == 1);
+    loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                        {:in_active[v]:} == 1 ==> is_red[v] == 1);
+    while (ri < num_roots) {
+        int r = roots[ri];
+        in_open[r] = 1;
+        if (is_red[r] == 1) {
+            in_active[r] = 1;
+            p[r] = r;
+        } else {
+            p[r] = -1;
+        }
+        ri = ri + 1;
+    }
+
+    // ── Outer loop — line 9 ──────────────────────────
+    int any_open = 1;
+    loop_invariant Perm(p[*],              1);
+    loop_invariant Perm(in_open[*],        1);
+    loop_invariant Perm(in_active[*],      1);
+    loop_invariant Perm(in_interrupted[*], 1);
+    loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                        {:p[v]:} == -2 || p[v] == -1 || (0 <= p[v] && p[v] < num_nodes));
+    loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                        (0 <= {:p[v]:} && p[v] < num_nodes) ==> is_red[p[v]] == 1);
+    loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                        {:in_active[v]:} == 1 ==> is_red[v] == 1);
+    while (any_open == 1) {
+
+        // ── Inner loop — lines 10-11 ─────────────────
+        int node = 0;
+        loop_invariant Perm(p[*],              1);
+        loop_invariant Perm(in_open[*],        1);
+        loop_invariant Perm(in_active[*],      1);
+        loop_invariant Perm(in_interrupted[*], 1);
+        loop_invariant 0 <= node && node <= num_nodes;
+        loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                            {:p[v]:} == -2 || p[v] == -1 || (0 <= p[v] && p[v] < num_nodes));
+        loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                            (0 <= {:p[v]:} && p[v] < num_nodes) ==> is_red[p[v]] == 1);
+        loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                            {:in_active[v]:} == 1 ==> is_red[v] == 1);
+        while (node < num_nodes) {
+            if (in_open[node] == 1) {
+                in_open[node] = 0;
+                int alpha = p[node];
+
+                // ── Child loop — lines 12-21 ─────────
+                int ci = 0;
+                loop_invariant Perm(p[*],              1);
+                loop_invariant Perm(in_open[*],        1);
+                loop_invariant Perm(in_active[*],      1);
+                loop_invariant Perm(in_interrupted[*], 1);
+                loop_invariant 0 <= ci && ci <= deg[node];
+                loop_invariant 0 <= R[node] && R[node] + deg[node] <= C.length;
+                loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                                    {:p[v]:} == -2 || p[v] == -1 || (0 <= p[v] && p[v] < num_nodes));
+                loop_invariant alpha == -2 || alpha == -1 || (0 <= alpha && alpha < num_nodes);
+                loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                                    (0 <= {:p[v]:} && p[v] < num_nodes) ==> is_red[p[v]] == 1);
+                loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                                    {:in_active[v]:} == 1 ==> is_red[v] == 1);
+                loop_invariant (0 <= alpha && alpha < num_nodes) ==> is_red[alpha] == 1;
+                while (ci < deg[node]) {
+                    int child = C[R[node] + ci];
+
+                    // line 13: accepting cycle — exit early
+                    if (alpha == child) {
+                        assert is_red[child] == 1;
+                        return true; // a counter example found
+                    }
+
+                    // lines 14-17: first visit to a red child
+                    if (p[child] == -2 && is_red[child] == 1) {
+                        in_active[child] = 1;
+                        if (child > alpha) {
+                            alpha = child;
+                        } else {
+                            in_interrupted[child] = 1;
+                        }
+                    }
+
+                    // line 18: atomic max update of p[child]
+                    int beta = p[child];
+                    p[child] = imax(alpha, beta);
+
+                    // line 19: 2nd interruption 
+                    if (alpha > beta && beta > -1 && in_open[child] == 1) {
+                        in_interrupted[beta] = 1;
+                    }
+
+                    // line 20: 3rd interruption 
+                    if (beta > alpha && alpha > -1 && in_active[child] == 0) {
+                        in_interrupted[alpha] = 1;
+                    }
+
+                    // line 21: reopen child if p grew
+                    if (alpha > beta) {
+                        in_open[child] = 1;
+                    }
+
+                    ci = ci + 1;
+                }
+            }
+            node = node + 1;
+        }
+
+        // ── Post-processing — lines 22-28 ────────────
+
+        // line 22: check F != empty
+        int any_interrupted = 0;
+        int chk = 0;
+        loop_invariant Perm(p[*],              1);
+        loop_invariant Perm(in_active[*],      1);
+        loop_invariant Perm(in_interrupted[*], 1);
+        loop_invariant 0 <= chk && chk <= num_nodes;
+        loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                            {:p[v]:} == -2 || p[v] == -1 || (0 <= p[v] && p[v] < num_nodes));
+        loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                            (0 <= {:p[v]:} && p[v] < num_nodes) ==> is_red[p[v]] == 1);
+        loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                            {:in_active[v]:} == 1 ==> is_red[v] == 1);
+        while (chk < num_nodes) {
+            if (in_interrupted[chk] == 1) { any_interrupted = 1; }
+            chk = chk + 1;
+        }
+
+        // lines 23-28: if F != empty, handle active/interrupted nodes
+        if (any_interrupted == 1) {
+            int v = 0;
+            loop_invariant Perm(p[*],              1);
+            loop_invariant Perm(in_open[*],        1);
+            loop_invariant Perm(in_active[*],      1);
+            loop_invariant Perm(in_interrupted[*], 1);
+            loop_invariant 0 <= v && v <= num_nodes;
+            loop_invariant (\forall int w; 0 <= w && w < num_nodes;
+                                {:p[w]:} == -2 || p[w] == -1 || (0 <= p[w] && p[w] < num_nodes));
+            loop_invariant (\forall int w; 0 <= w && w < num_nodes;
+                                (0 <= {:p[w]:} && p[w] < num_nodes) ==> is_red[p[w]] == 1);
+            loop_invariant (\forall int w; 0 <= w && w < num_nodes;
+                                {:in_active[w]:} == 1 ==> is_red[w] == 1);
+            while (v < num_nodes) {
+                if (in_active[v] == 1) {
+                    if (in_interrupted[v] == 1 && p[v] != v) {
+                        in_open[v] = 1;
+                    } else {
+                        in_active[v] = 0;
+                    }
+                    in_interrupted[v] = 0;
+                }
+                if (in_active[v] == 1) {
+                    p[v] = v;
+                } else {
+                    p[v] = -1;
+                }
+                v = v + 1;
+            }
+        }
+
+        // Recompute any_open for the outer loop guard
+        any_open = 0;
+        int ov = 0;
+        loop_invariant Perm(p[*],         1);
+        loop_invariant Perm(in_active[*], 1);
+        loop_invariant Perm(in_open[*],   1);
+        loop_invariant 0 <= ov && ov <= num_nodes;
+        loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                            {:p[v]:} == -2 || p[v] == -1 || (0 <= p[v] && p[v] < num_nodes));
+        loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                            (0 <= {:p[v]:} && p[v] < num_nodes) ==> is_red[p[v]] == 1);
+        loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+                            {:in_active[v]:} == 1 ==> is_red[v] == 1);
+        while (ov < num_nodes) {
+            if (in_open[ov] == 1) { any_open = 1; }
+            ov = ov + 1;
+        }
+    }
+
+    return false; // no counter example found
+}
