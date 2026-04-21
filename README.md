@@ -1,10 +1,11 @@
 # Formal Verification of the Hitchhiking Algorithm in VerCors
 
-This repository contains the formal verification of **Algorithm 2 (Hitchhiking)** from the paper, implemented and verified using [VerCors](https://vercors.ewi.utwente.nl/) with PVL (Prototypal Verification Language).
+This repository contains the formal verification of **Algorithm 2 (Hitchhiking)** from the paper [Hitching a Ride to a Lasso: Massively Parallel
+On-The-Fly LTL Model Checking](hitchhiking-paper.pdf), implemented and verified using [VerCors](https://vercors.ewi.utwente.nl/) with PVL (Prototypal Verification Language).
 
 ## Background
 
-The Hitchhiking algorithm detects accepting cycles in a graph — a key step in model checking for linear temporal logic (LTL). It operates on a directed graph in CSR (Compressed Sparse Row) format and uses three flag arrays to track state:
+The Hitchhiking algorithm detects accepting cycles in a graph. It operates on a directed graph in CSR (Compressed Sparse Row) format and uses three flag arrays to track state:
 
 | Symbol | Array | Meaning |
 |--------|-------|---------|
@@ -33,7 +34,7 @@ Special values for `p[v]`:
 ├── milestone4.pvl       # Child loop with full traversal logic (lines 12–21)
 ├── milestone5.pvl       # Complete algorithm with post-processing (lines 22–28)
 ├── milestone6.pvl       # First soundness condition: is_red[child] == 1 at return true
-├── milestone7.pvl       # Ghost witness path + cleanup (seq inputs, BOTTOM/EPSILON)
+├── milestone7.pvl       # Second and third soundness conditions: there is a path from child to node and an edge from node to child at return true
 └── README.md
 ```
 
@@ -65,10 +66,10 @@ Begins the soundness proof by verifying the first condition: **when the algorith
    loop_invariant (0 <= alpha && alpha < num_nodes) ==> is_red[alpha] == 1;
    ```
 
-### Milestone 7 — Ghost Witness Path and Cleanup (`milestone7.pvl`)
+### Milestone 7 — Second and third soundness conditions (`milestone7.pvl`)
 Completes the soundness proof by introducing a ghost witness path and refactoring the contract for clarity.
 
-**Ghost witness path:** Introduces `ghost seq<int>[] ghost_path` — a verification-only array where `ghost_path[v]` stores a witness path from `p[v]` to `v`. The following invariant is added to all 7 loops:
+**Ghost witness path:** Introduces `ghost seq<int>[] ghost_path`, wihch is a verification-only array where `ghost_path[v]` stores a witness path from `p[v]` to `v`. The following invariant is added to all 7 loops:
 ```pvl
 loop_invariant (\forall int v; 0 <= v && v < num_nodes;
     (0 <= {:p[v]:} && p[v] < num_nodes) ==>
@@ -89,13 +90,6 @@ requires 0 <= R[u] && R[u+1] <= |C|;
 pure bool hasEdge(seq<int> R, seq<int> C, int u, int v) =
     (\exists int j; R[u] <= j && j < R[u+1]; {:C[j]:} == v);
 ```
-To prove `hasEdge(R, C, node, child)` (where `child = C[R[node] + ci]`), two intermediate witness hints are asserted before the call so Z3 can instantiate the existential with `j = R[node] + ci`:
-```pvl
-assert R[node] <= R[node] + ci && R[node] + ci < R[node+1];
-assert C[R[node] + ci] == child;
-assert hasEdge(R, C, node, child);
-```
-
 **Ghost path update:** The child loop updates `ghost_path` in two cases — case 1 must be checked first to avoid a self-loop aliasing bug:
 - `p[child] == child` → `ghost_path[child] = [child]`
 - `p[child] == p[node] && p[child] >= 0` → `ghost_path[child] = ghost_path[node] + [child]`
@@ -106,7 +100,7 @@ assert is_red[child] == 1;
 assert ghost_path[node][0] == child;
 assert ghost_path[node][|ghost_path[node]| - 1] == node;
 ```
-Together they witness: `child` is red, the path stored for `node` starts at `child` (i.e. `p[node] == child`), ends at `node`, consists only of valid nodes, and all consecutive pairs are real edges — and `node` has `child` as a successor (from `alpha == child`). This constitutes a complete witnessed accepting cycle.
+Together they witness: `child` is red, the path stored for `node` starts at `child` (i.e. `p[node] == child`), ends at `node`, consists only of valid nodes, and all consecutive pairs are real edges, and `node` has `child` as a successor (from `alpha == child`). This constitutes a complete witnessed accepting cycle.
 
 **Cleanup:** Read-only inputs `roots`, `deg`, `is_red`, `R`, and `C` are changed from `int[]` to `seq<int>`, removing their `Perm` and null-check annotations. The magic numbers `-2` and `-1` are replaced by `BOTTOM()` and `EPSILON()` pure functions.
 
@@ -120,10 +114,3 @@ vct milestone5.pvl
 ```
 
 Replace `milestone5.pvl` with whichever file you want to check.
-
-## Key VerCors Concepts Used
-
-- **`context_everywhere`** — propagates a condition into every loop automatically; used for read-only array permissions and structural graph invariants.
-- **`context Perm(arr[*], 1)`** — full write permission for mutable arrays; stated as `context` (not `context_everywhere`) because array values change.
-- **`loop_invariant`** — re-establishes permissions and value invariants at each loop iteration; loop invariants can only redistribute permissions the method already holds.
-- **Trigger hints `{: expr :}`** — guide the SMT solver when reasoning about universally quantified expressions over arrays.
