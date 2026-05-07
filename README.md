@@ -104,6 +104,29 @@ Together they witness: `child` is red, the path stored for `node` starts at `chi
 
 **Cleanup:** Read-only inputs `roots`, `deg`, `is_red`, `R`, and `C` are changed from `int[]` to `seq<int>`, removing their `Perm` and null-check annotations. The magic numbers `-2` and `-1` are replaced by `BOTTOM()` and `EPSILON()` pure functions.
 
+### Milestone 8 — Lemma 1: termination of each round (`milestone8.pvl`)
+
+Proves **Lemma 1** from the paper: every time the main loop is entered and no counter-example is found, the loop eventually terminates (i.e., the open set O becomes empty). This required two changes relative to milestone 7.
+
+**Structural refactoring — from flag to queue:** The `any_open` flag and full-node-scan inner loop (`while (node < num_nodes) { if (in_open[node] == 1) ... }`) are replaced by an explicit `seq<int> open_queue` and an integer `ptr`. Nodes are appended to the queue when first enqueued and `ptr` advances as they are dequeued. The outer loop becomes `while (ptr < |open_queue|)` and the inner loop (one round) is a nested `while (ptr < |open_queue|)`. The seed loop now also deduplicates roots (`if (in_open[r] == 0)`) before enqueuing. The end-of-round "recompute `any_open`" loop is eliminated — the queue handles termination detection.
+
+**Termination proof — `decreases` clause:** A ghost variable `sum_p` tracks the total accumulated increase in p-values across all nodes. The termination measure is:
+```pvl
+decreases num_nodes * num_nodes - sum_p, |open_queue| - ptr;
+```
+This is a lexicographic pair: the primary component decreases as p-values increase (each p[v] can increase at most num_nodes times, so the sum is bounded by num_nodes²); the secondary component decreases as nodes are dequeued within a single round. Ghost snapshot variables `sum_p0` and `q0` are taken at the start of processing each node, and the invariant `sum_p - sum_p0 >= |open_queue| - q0` ensures that every new enqueue is accompanied by a p-value increase — preventing the queue from growing unboundedly without progress.
+
+### Milestone 9 — Lemma 2: p ≠ BOTTOM for all enqueued nodes (`milestone9.pvl`)
+
+Proves **Lemma 2** from the paper: once the first round completes, every reachable node has p ≠ ⊥ (BOTTOM), and this property is preserved for the rest of the execution. In the PVL encoding this is expressed as: every node ever placed in `open_queue` has `p ≠ BOTTOM()`.
+
+**Lemma 2 invariant:** The following invariant is added to all 6 loops:
+```pvl
+loop_invariant (\forall int j; 0 <= j && j < |open_queue|;
+    {:p[open_queue[j]]:} != BOTTOM());
+```
+It holds because: roots are enqueued with `p[r] = r` or `p[r] = EPSILON()`, both ≠ BOTTOM; children are enqueued only when `alpha > beta`, at which point `p[child]` has just been set to `alpha ≥ EPSILON() > BOTTOM()`; nodes re-enqueued during post-processing already had `p ≠ BOTTOM` from a prior enqueue. No write to `p` anywhere in the algorithm can produce BOTTOM.
+
 
 ## Running the Verifier
 
