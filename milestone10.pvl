@@ -334,6 +334,7 @@ bool hitchhiking(
 
         // lines 23-28: if F != empty, handle active/interrupted nodes
         if (any_interrupted == 1) {
+            ghost int new_max = BOTTOM();
             int v = 0;
             loop_invariant Perm(p[*],              write);
             loop_invariant Perm(in_open[*],        write);
@@ -366,6 +367,9 @@ bool hitchhiking(
             loop_invariant max_active == BOTTOM() || (0 <= max_active && max_active < num_nodes);
             loop_invariant (\forall int w; 0 <= w && w < num_nodes; {:p[w]:} >= 0 ==> p[w] <= max_active);
             loop_invariant (\forall int v; 0 <= v && v < num_nodes; {:in_active[v]:} == 1 ==> v <= max_active);
+            loop_invariant new_max == BOTTOM() || (0 <= new_max && new_max < num_nodes);
+            loop_invariant (\forall int w; 0 <= w && w < v; {:in_active[w]:} == 1 ==> w <= new_max);
+            loop_invariant (\forall int w; 0 <= w && w < v; {:p[w]:} >= 0 ==> p[w] <= new_max);
 
             while (v < num_nodes) {
                 if (in_active[v] == 1) {
@@ -382,6 +386,7 @@ bool hitchhiking(
                 }
                 if (in_active[v] == 1) {
                     p[v] = v;
+                    ghost if (v > new_max) { new_max = v; }
                     ghost ghost_path[v] = [v];
                 } else {
                     p[v] = EPSILON();
@@ -389,6 +394,7 @@ bool hitchhiking(
                 }
                 v = v + 1;
             }
+            ghost max_active = new_max;
         }
 
     }
