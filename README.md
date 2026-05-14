@@ -127,6 +127,36 @@ loop_invariant (\forall int j; 0 <= j && j < |open_queue|;
 ```
 It holds because: roots are enqueued with `p[r] = r` or `p[r] = EPSILON()`, both ≠ BOTTOM; children are enqueued only when `alpha > beta`, at which point `p[child]` has just been set to `alpha ≥ EPSILON() > BOTTOM()`; nodes re-enqueued during post-processing already had `p ≠ BOTTOM` from a prior enqueue. No write to `p` anywhere in the algorithm can produce BOTTOM.
 
+### Milestone 10 — Lemma 3: max active node ≥ all p-values (`milestone10.pvl`)
+
+Proves **Lemma 3** from the paper: if the active set A is non-empty, then for every node q̄ in the product state space, the maximum active node ID is at least p(q̄). In the PVL encoding this means: the historically largest node ever activated is an upper bound on all non-negative p-values.
+
+**Ghost variable `max_active`:** A ghost integer tracks the maximum node ID ever placed into the active set across the entire execution:
+```pvl
+ghost int max_active = BOTTOM();
+```
+It is updated (and only ever increased) immediately after each `in_active[v] = 1` assignment — once in the seed loop and once in the child loop:
+```pvl
+ghost if (r > max_active) { max_active = r; }      // seed loop
+ghost if (child > max_active) { max_active = child; } // child loop
+```
+The ghost update in the child loop is placed *before* the `if (child > alpha)` branch so that VerCors can derive `child <= max_active` sequentially when alpha is set to `child`, without needing an extra alpha invariant.
+
+**Three new invariants added to all 6 loops:**
+```pvl
+loop_invariant max_active == BOTTOM() || (0 <= max_active && max_active < num_nodes);
+loop_invariant (\forall int w; 0 <= w && w < num_nodes; {:p[w]:} >= 0 ==> p[w] <= max_active);
+loop_invariant (\forall int v; 0 <= v && v < num_nodes; {:in_active[v]:} == 1 ==> v <= max_active);
+```
+The first is a bounds invariant. 
+
+The second is Lemma 3 itself: any node with a non-negative p-value is ≤ max_active. 
+
+The third invariant is a supporting lemma required specifically for the reset loop: when the reset loop sets `p[v] = v` for active nodes, VerCors needs to know `v <= max_active` to re-establish the Lemma 3 invariant.
+
+The `max_active` is updated in the post-processing loop because some nodes are removed from the set of active nodes `in_active[]`.
+
+
 
 ## Running the Verifier
 
