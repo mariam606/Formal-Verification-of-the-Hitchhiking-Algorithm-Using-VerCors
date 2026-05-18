@@ -35,6 +35,10 @@ Special values for `p[v]`:
 ├── milestone5.pvl       # Complete algorithm with post-processing (lines 22–28)
 ├── milestone6.pvl       # First soundness condition: is_red[child] == 1 at return true
 ├── milestone7.pvl       # Second and third soundness conditions: there is a path from child to node and an edge from node to child at return true
+├── milestone8.pvl       # Lemma 1 (completeness): termination of each round via open_queue refactoring and decreases clause
+├── milestone9.pvl       # Lemma 2 (completeness): every enqueued node has p ≠ BOTTOM
+├── milestone10.pvl      # Lemma 3 (completeness): max active node ID ≥ all p-values
+├── milestone11.pvl      # Lemma 4 (completeness): if max_active is in an accepting cycle and all p ≠ BOTTOM, the algorithm returns true in the current round
 └── README.md
 ```
 
@@ -104,6 +108,7 @@ Together they witness: `child` is red, the path stored for `node` starts at `chi
 
 **Cleanup:** Read-only inputs `roots`, `deg`, `is_red`, `R`, and `C` are changed from `int[]` to `seq<int>`, removing their `Perm` and null-check annotations. The magic numbers `-2` and `-1` are replaced by `BOTTOM()` and `EPSILON()` pure functions.
 
+
 ### Milestone 8 — Lemma 1: termination of each round (`milestone8.pvl`)
 
 Proves **Lemma 1** from the paper: every time the main loop is entered and no counter-example is found, the loop eventually terminates (i.e., the open set O becomes empty). This required two changes relative to milestone 7.
@@ -127,6 +132,7 @@ loop_invariant (\forall int j; 0 <= j && j < |open_queue|;
 ```
 It holds because: roots are enqueued with `p[r] = r` or `p[r] = EPSILON()`, both ≠ BOTTOM; children are enqueued only when `alpha > beta`, at which point `p[child]` has just been set to `alpha ≥ EPSILON() > BOTTOM()`; nodes re-enqueued during post-processing already had `p ≠ BOTTOM` from a prior enqueue. No write to `p` anywhere in the algorithm can produce BOTTOM.
 
+
 ### Milestone 10 — Lemma 3: max active node ≥ all p-values (`milestone10.pvl`)
 
 Proves **Lemma 3** from the paper: if the active set A is non-empty, then for every node q̄ in the product state space, the maximum active node ID is at least p(q̄). In the PVL encoding this means: the historically largest node ever activated is an upper bound on all non-negative p-values.
@@ -148,15 +154,64 @@ loop_invariant max_active == BOTTOM() || (0 <= max_active && max_active < num_no
 loop_invariant (\forall int w; 0 <= w && w < num_nodes; {:p[w]:} >= 0 ==> p[w] <= max_active);
 loop_invariant (\forall int v; 0 <= v && v < num_nodes; {:in_active[v]:} == 1 ==> v <= max_active);
 ```
-The first is a bounds invariant. 
+The first is a bounds invariant. The second is Lemma 3 itself: any node with a non-negative p-value is ≤ max_active. The implication form (`>= 0 ==>`) correctly excludes the sentinels BOTTOM(−2) and EPSILON(−1) without the vacuous-truth problem that arises with a conditional like `max_active >= 0 ==>`.
 
-The second is Lemma 3 itself: any node with a non-negative p-value is ≤ max_active. 
+The third invariant is a supporting lemma required specifically for the reset loop: when the reset loop sets `p[v] = v` for active nodes, VerCors needs to know `v <= max_active` to re-establish the Lemma 3 invariant — and this is provided by `in_active[v] == 1 ==> v <= max_active`.
 
-The third invariant is a supporting lemma required specifically for the reset loop: when the reset loop sets `p[v] = v` for active nodes, VerCors needs to know `v <= max_active` to re-establish the Lemma 3 invariant.
+### Milestone 11 — Lemma 4: if max_active is in an accepting cycle, the algorithm detects it (`milestone11.pvl`)
 
-The `max_active` is updated in the post-processing loop because some nodes are removed from the set of active nodes `in_active[]`.
+Proves **Lemma 4** from the paper: *at the start of a round (l.9), if q̄_max ∈ C (the maximum active node is part of an accepting cycle) and ∀q̄ ∈ Q_⊗.p(q̄) ≠ ⊥ (all states have been reached, guaranteed by Lemma 2), then Hitchhiking returns a counter-example at l.13 before the round ends at l.22.*
 
+In the PVL encoding, this is captured by the contrapositive: as long as the algorithm has not yet returned `true`, no settled node (not in `open_queue`) whose `p`-value equals `max_active` can have a completed accepting cycle as its ghost path.
 
+**`isCycle` pure function:** A new pure predicate checks whether a sequence of nodes forms a cycle in the CSR graph:
+```pvl
+requires 0 < |path|;
+requires (\forall int i; 0 <= i && i < |path|; 0 <= path[i] && path[i] < |R| - 1);
+requires (\forall int i; 0 <= i && i < |path|; 0 <= R[path[i]] && R[path[i] + 1] <= |C|);
+pure bool isCycle(seq<int> path, seq<int> R, seq<int> C) =
+    (\forall int i; 0 <= i && i < |path| - 1; hasEdge(R, C, path[i], path[i + 1])) &&
+    hasEdge(R, C, path[|path| - 1], path[0]);
+```
+The three preconditions ensure the path is non-empty and all its nodes are in bounds so `hasEdge` can be called safely.
+
+**Core `!isCycle` invariant added to all loops (seed, outer, middle, "check F", reset):**
+```pvl
+loop_invariant (\forall int v; 0 <= v && v < num_nodes;
+    {:in_open[v]:} == 0 && 0 <= {:p[v]:} && {:p[v]:} == max_active ==>
+    !isCycle(ghost_path[v], R, C));
+```
+This says: for every settled node (not in the open queue) whose parent pointer equals `max_active`, the recorded ghost path is not yet a cycle. The invariant is sound because the only way `ghost_path[v]` could become a cycle while `p[v] == max_active` is if there is an edge from `v` back to `max_active`, but the child loop checks exactly this condition (`alpha == child`) and returns `true` immediately when it holds.
+
+**Child loop adaptation:** When `node` is being processed, it has already been removed from the open queue (`in_open[node] = 0`), but its successors are only partially scanned. The standard invariant cannot yet apply to `node` itself because the closing edge may not have been checked yet. It is therefore split into two parts:
+```pvl
+// For node: none of the already-scanned edges close a cycle back to max_active
+loop_invariant 0 <= {:p[node]:} && {:p[node]:} == max_active && {:in_open[node]:} == 0 ==>
+    (\forall int j; R[node] <= j && j < R[node] + ci; {:C[j]:} != max_active);
+// For all other settled nodes: standard !isCycle invariant
+loop_invariant (\forall int v; 0 <= v && v < num_nodes && v != node;
+    {:in_open[v]:} == 0 && 0 <= {:p[v]:} && {:p[v]:} == max_active ==>
+    !isCycle(ghost_path[v], R, C));
+```
+The first part is maintained because whenever `C[R[node] + ci] == max_active` and `p[node] == max_active`, the condition `alpha == child` fires and `return true` is reached, so the loop body is never entered in that case.
+
+**Post-round assertion:** After the inner processing loop drains the queue, the invariant is re-asserted explicitly to confirm no cycle was missed in the completed round:
+```pvl
+assert (\forall int v; 0 <= v && v < num_nodes;
+    {:in_open[v]:} == 0 && 0 <= {:p[v]:} && {:p[v]:} == max_active ==>
+    !isCycle(ghost_path[v], R, C));
+```
+
+**Reset loop helper invariants:** The reset loop resets `p` and replaces `max_active` with a fresh `new_max`. To allow VerCors to re-establish the `!isCycle` invariant (now keyed on `new_max`) for the next round, three supporting invariants are added that describe the state of already-processed nodes (w < v):
+```pvl
+loop_invariant (\forall int w; 0 <= w && w < v; {:in_active[w]:} == 1 ==> {:in_open[w]:} == 1);
+loop_invariant (\forall int w; 0 <= w && w < v; {:in_active[w]:} == 0 ==> {:p[w]:} == EPSILON());
+loop_invariant (\forall int w; 0 <= w && w < v; {:in_open[w]:} == 0 ==> {:p[w]:} < 0);
+loop_invariant (\forall int w; 0 <= w && w < v;
+    {:in_open[w]:} == 0 && 0 <= {:p[w]:} && {:p[w]:} == new_max ==>
+    !isCycle(ghost_path[w], R, C));
+```
+The first three helper invariants together make the fourth vacuously true for w < v: active nodes that remain active are re-enqueued (`in_open = 1`), so `in_open[w] == 0` is false; inactive nodes receive `p[w] = EPSILON() < 0`, so `0 <= p[w]` is false. This lets VerCors derive the `!isCycle` guard cannot be triggered for already-reset nodes, and the last invariant then holds for the new maximum `new_max`, which becomes `max_active` at the start of the next round.
 
 ## Running the Verifier
 
