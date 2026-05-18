@@ -162,7 +162,7 @@ The third invariant is a supporting lemma required specifically for the reset lo
 
 Proves **Lemma 4** from the paper: *at the start of a round (l.9), if q̄_max ∈ C (the maximum active node is part of an accepting cycle) and ∀q̄ ∈ Q_⊗.p(q̄) ≠ ⊥ (all states have been reached, guaranteed by Lemma 2), then Hitchhiking returns a counter-example at l.13 before the round ends at l.22.*
 
-In the PVL encoding, this is captured by the contrapositive: as long as the algorithm has not yet returned `true`, no settled node (not in `open_queue`) whose `p`-value equals `max_active` can have a completed accepting cycle as its ghost path.
+**Contrapositive proof strategy:** Rather than proving the forward direction directly ("if max_active ∈ C then return true"), the PVL proof establishes the contrapositive: *if the algorithm has not returned `true`, then max_active is not in an accepting cycle.* 
 
 **`isCycle` pure function:** A new pure predicate checks whether a sequence of nodes forms a cycle in the CSR graph:
 ```pvl
