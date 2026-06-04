@@ -185,10 +185,8 @@ This says: for every settled node (not in the open queue) whose parent pointer e
 
 **Child loop adaptation:** When `node` is being processed, it has already been removed from the open queue (`in_open[node] = 0`), but its successors are only partially scanned. The standard invariant cannot yet apply to `node` itself because the closing edge may not have been checked yet. It is therefore split into two parts:
 ```pvl
-// For node: none of the already-scanned edges close a cycle back to max_active
 loop_invariant 0 <= {:p[node]:} && {:p[node]:} == max_active && {:in_open[node]:} == 0 ==>
     (\forall int j; R[node] <= j && j < R[node] + ci; {:C[j]:} != max_active);
-// For all other settled nodes: standard !isCycle invariant
 loop_invariant (\forall int v; 0 <= v && v < num_nodes && v != node;
     {:in_open[v]:} == 0 && 0 <= {:p[v]:} && {:p[v]:} == max_active ==>
     !isCycle(ghost_path[v], R, C));
