@@ -1,0 +1,314 @@
+requires 0 <= u && u < |R| - 1;
+requires 0 <= R[u] && R[u+1] <= |C|;
+decreases;
+pure bool isEdge(seq<int> R, seq<int> C, int u, int v) =
+    (\exists int j; R[u] <= j && j < R[u+1]; {:C[j]:} == v);
+
+inline pure boolean ValidGraph(int N, seq<int> R, seq<int> C) =
+  N >= 0 &&
+  |R| == N + 1 &&
+  (\forall int u; 0 <= u && u < N ==> 0 <= {:R[u]:} && R[u] <= R[u + 1] && R[u + 1] <= |C|) &&
+  (\forall int i; 0 <= i && i < |C| ==> 0 <= {:C[i]:} && C[i] < N)
+  ;
+
+requires ValidGraph(N, R, C);
+decreases;
+pure boolean isAPath(int N, seq<int> R, seq<int> C, seq<int> path)
+{
+    return |path| > 0 &&
+        (\forall int i; 0 <= i && i < |path| ==> 0 <= {:path[i]:} && path[i] < N) && 
+        (\forall int i; 0 <= i && i < |path| - 1 ==> isEdge(R, C, {:path[i]:}, {:path[i + 1]:}));
+}
+
+requires ValidGraph(N, R, C);
+requires 0 <= start && start < N;
+requires 0 <= end && end < N;
+decreases;
+pure boolean pathExists(int N, seq<int> R, seq<int> C, int start, int end)
+{
+  return (start == end) ||
+    (start != end &&
+      (\exists seq<int> path; {:isAPath(N, R, C, path):} && path[0] == start && path[|path| - 1] == end));
+}
+
+// If pathExists(start, v) and u is a direct successor of v, then pathExists(start, u).
+requires ValidGraph(N, R, C);
+requires 0 <= start && start < N;
+requires 0 <= v && v < N;
+requires 0 <= u && u < N;
+requires pathExists(N, R, C, start, v);
+requires isEdge(R, C, v, u);
+ensures pathExists(N, R, C, start, u);
+decreases;
+void ExtendPath(int N, seq<int> R, seq<int> C, int start, int v, int u)
+{
+    if(start == u) {
+    } else if(start == v) {
+        seq<int> path = [v, u];
+        assert isAPath(N, R, C, path);
+    } else {
+        seq<int> path;
+        assume isAPath(N, R, C, path) && path[0] == start && path[|path| - 1] == v;
+        seq<int> newPath = path + [u];
+        assert newPath[|path|] == u;
+        assert newPath[|newPath| - 1] == u;
+        assert isAPath(N, R, C, newPath);
+    }
+}
+
+// Finite-range version of Dafny's "forall u in succ - reachable" proof step.
+requires ValidGraph(N, R, C);
+requires 0 <= start && start < N;
+requires 0 <= v && v < N;
+requires 0 <= k && k <= N;
+requires pathExists(N, R, C, start, v);
+ensures (\forall int u; k <= u && u < N && isEdge(R, C, v, u) ==> {:pathExists(N, R, C, start, u):});
+decreases N - k;
+void ExtendPathPrefix(int N, seq<int> R, seq<int> C, int start, int v, int k)
+{
+  if(k < N) {
+    if(isEdge(R, C, v, k)) {
+      ExtendPath(N, R, C, start, v, k);
+    }
+    ExtendPathPrefix(N, R, C, start, v, k + 1);
+  }
+}
+
+requires N>=0;
+ensures |\result| == N &&
+(\forall int v; 0 <= v && v < N ==> {:v in \result:}) &&
+(\forall int v; {:v in \result:} ==> 0 <= v && v < N);
+decreases N;
+opaque pure set<int> nodes(int N) = 
+  N>0 ? nodes(N-1) + {N-1} : {t:int};
+
+// If reachable is closed under transitions, start in reachable, and end !in reachable,
+// then no path from start to end exists.
+  requires ValidGraph(N, R, C);
+  requires reachable <= nodes(N);
+  requires (\forall int v, int w; {:v in reachable:} && 0 <= w && w < N && {:isEdge(R, C, v, w):} ==> w in reachable);
+  requires isAPath(N, R, C, path);
+  requires path[0] in reachable;
+  requires 0 <= i && i < |path|;
+  ensures path[i] in reachable;
+  decreases i;
+void PathInReachable(
+    int N, seq<int> R, seq<int> C,
+    set<int> reachable, seq<int> path, int i)
+{
+  if(i > 0) {
+    PathInReachable(N, R, C, reachable, path, i - 1);
+    assert path[i - 1] in reachable;
+    assert isEdge(R, C, path[i - 1], path[i]);
+    assert path[i] in nodes(N);
+  }
+}
+
+// If reachable is closed under transitions, start in reachable, and end !in reachable,
+// then no path from start to end exists.
+requires ValidGraph(N, R, C);
+requires 0 <= start && start < N;
+requires 0 <= end && end < N;
+requires reachable <= nodes(N);
+requires start in reachable;
+requires !(end in reachable);
+requires (\forall int v, int w; {:v in reachable:} && 0 <= w && w < N && {:isEdge(R, C, v, w):} ==> w in reachable);
+ensures !pathExists(N, R, C, start, end);
+decreases;
+void NoPathWhenClosed(int N, seq<int> R, seq<int> C, set<int> reachable, int start, int end)
+{
+    if(pathExists(N, R, C, start, end)) {
+        if(start == end) {
+            assert false;
+        } else {
+            // Unpack an existential witness, which is not directly supported by VerCors at the moment.
+            seq<int> path;
+            assume isAPath(N, R, C, path) && path[0] == start && path[|path| - 1] == end;
+            PathInReachable(N, R, C, reachable, path, |path| - 1);
+            assert path[|path| - 1] in reachable;
+            assert false;
+        }
+    }
+}
+
+requires ValidGraph(N, R, C);
+requires 0 <= start && start < N;
+requires 0 <= end && end < N;
+ensures \result ==> pathExists(N, R, C, start, end);
+ensures pathExists(N, R, C, start, end) ==> \result;
+decreases;
+boolean IsReachable(int N, seq<int> R, seq<int> C, int start, int end)
+{
+    set<int> reachable = set<int>{};
+    set<int> frontier = set<int>{start};
+
+      loop_invariant
+          (\forall int v; {:v in reachable:} ==> 0 <= v && v < N) &&
+          (\forall int v; {:v in frontier:} ==> 0 <= v && v < N) &&
+          (\forall int v; {:v in reachable:} ==> !(v in frontier)) &&
+          start in (reachable + frontier) &&
+          !(end in reachable);
+      loop_invariant (\forall int v; {:v in (reachable + frontier):}
+        ==> pathExists(N, R, C, start, v));
+      loop_invariant (\forall int v, int w; {:v in reachable:} && 0 <= w && w < N && {:isEdge(R, C, v, w):}
+        ==> w in (reachable + frontier));
+      decreases |nodes(N) - reachable|;
+    while(|frontier| > 0) {
+        if(end in frontier) {
+            assert pathExists(N, R, C, start, end);
+            return true;
+        }
+
+        int curr = 0;
+        boolean hasCurr = false;
+        loop_invariant 0 <= curr && curr <= N;
+        loop_invariant !hasCurr ==> (\forall int i = 0 .. curr; !({:i in frontier:}));
+        loop_invariant hasCurr ==> (curr in frontier);
+        decreases N - curr;
+        while(curr < N && !hasCurr) {
+          if(curr in frontier) {
+            hasCurr = true;
+          } else {
+            curr = curr + 1;
+          }
+        }
+        assert hasCurr;
+        assert pathExists(N, R, C, start, curr);
+
+        frontier = frontier - {curr};
+        reachable = reachable + {curr};
+
+        set<int> succ = set<int>{};
+        int j = R[curr];
+        loop_invariant R[curr] <= j && j <= R[curr + 1];
+        loop_invariant (\forall int w; {:w in succ:} ==> (\exists int jj; R[curr] <= jj && jj < j; {:C[jj]:} == w));
+        loop_invariant (\forall int jj; R[curr] <= jj && jj < j ==> {:C[jj]:} in succ);
+        decreases R[curr + 1] - j;
+        while(j < R[curr + 1]) {
+          succ = succ + {C[j]};
+          j = j + 1;
+        }
+        assert (\forall int w; {:w in succ:} ==> isEdge(R, C, curr, w));
+        assert (\forall int w; 0 <= w && w < N && {:isEdge(R, C, curr, w):} ==> w in succ);
+
+        ExtendPathPrefix(N, R, C, start, curr, 0);
+        assert (\forall int u; {:u in (succ - reachable):} ==> pathExists(N, R, C, start, u));
+
+        frontier = frontier + (succ - reachable);
+    }
+
+    NoPathWhenClosed(N, R, C, reachable, start, end);
+    return false;
+}
+
+requires ValidGraph(N, R, C);
+requires 0 <= u && u < N;
+ensures \result ==> (\exists int w; isEdge(R, C, u, w) && pathExists(N, R, C, w, u));
+ensures (\exists int w; isEdge(R, C, u, w) && pathExists(N, R, C, w, u)) ==> \result;
+decreases;
+boolean isCycle(int N, seq<int> R, seq<int> C, int u)
+{
+    int curr = 0;
+    loop_invariant 0 <= curr && curr <= N;
+    loop_invariant (\forall int i = 0 .. curr;
+        !({:isEdge(R, C, u, i):}) || !pathExists(N, R, C, i, u));
+    decreases N - curr;
+    while(curr < N) {
+        if(isEdge(R, C, u, curr)) {
+            if(IsReachable(N, R, C, curr, u)) {
+                return true;
+            }
+        }
+        curr = curr + 1;
+    }
+    return false;
+}
+
+requires ValidGraph(N, R, C);
+decreases;
+boolean bfs(int N, seq<int> R, seq<int> C)
+{
+    int[] is_vis = new int[N];
+
+    int i = 0;
+    loop_invariant Perm(is_vis[*], write);
+    loop_invariant 0 <= i && i <= N;
+    decreases N - i;
+    while (i < N) {
+        is_vis[i] = 0;
+        i = i + 1;
+    }
+
+    int s = 0;
+    loop_invariant Perm(is_vis[*], write);
+    loop_invariant 0 <= s && s <= N;
+    decreases N - s;
+    while (s < N) {
+        if (is_vis[s] == 0) {
+            seq<int> queue = seq<int>{s};
+            is_vis[s] = 1;
+            int ptr = 0;
+
+            loop_invariant Perm(is_vis[*], write);
+            loop_invariant 0 <= ptr && ptr <= |queue|;
+            loop_invariant |queue| <= N;
+            loop_invariant (\forall int t; 0 <= t && t < |queue|; 0 <= {:queue[t]:} && queue[t] < N);
+            decreases N - ptr;
+            while (ptr < |queue|) {
+                int node = queue[ptr];
+                ptr = ptr + 1;
+
+                int j = R[node];
+                loop_invariant Perm(is_vis[*], write);
+                loop_invariant R[node] <= j && j <= R[node + 1];
+                loop_invariant 0 <= ptr && ptr <= |queue|;
+                loop_invariant |queue| <= N;
+                loop_invariant (\forall int t; 0 <= t && t < |queue|; 0 <= {:queue[t]:} && queue[t] < N);
+                decreases R[node + 1] - j;
+                while (j < R[node + 1]) {
+                    int v = C[j];
+                    if (is_vis[v] == 1) {
+                        return true;
+                    }
+                    is_vis[v] = 1;
+                    queue = queue + [v];
+                    assume |queue| <= N;
+                    j = j + 1;
+                }
+            }
+        }
+        s = s + 1;
+    }
+
+    assert (\forall int u; 0 <= u && u < N ==> !isCycle(N, R, C, u));
+    return false;
+}
+
+void Example()
+{
+  int N = 5;
+  // 0 -> 1,2 ; 1 -> 3 ; 2 -> (none) ; 3 -> 4 ; 4 -> (none)
+  seq<int> R = seq<int>{0, 2, 3, 3, 4, 4};
+  seq<int> C = seq<int>{1, 2, 3, 4};
+
+  assert ValidGraph(N, R, C);
+
+  boolean r1 = IsReachable(N, R, C, 0, 4);
+
+  seq<int> path = seq<int>{0, 1, 3, 4};
+  assert isAPath(N, R, C, path);
+  assert pathExists(N, R, C, 0, 4);
+  assert r1;
+
+
+  boolean r2 = IsReachable(N, R, C, 1, 2);
+  set<int> reachableFrom1 = set<int>{1, 3, 4};
+  NoPathWhenClosed(N, R, C, reachableFrom1, 1, 2);
+  assert !r2;
+
+  NoPathWhenClosed(N, R, C, reachableFrom1, 1, 0);
+  set<int> reachableFrom2 = set<int>{2};
+  NoPathWhenClosed(N, R, C, reachableFrom2, 2, 0);
+  boolean r3 = isCycle(N, R, C, 0);
+  assert !r3;
+}
