@@ -1,0 +1,260 @@
+requires 0 <= u && u < |R| - 1;
+requires 0 <= R[u] && R[u+1] <= |C|;
+decreases;
+pure bool isEdge(seq<int> R, seq<int> C, int u, int v) =
+    (\exists int j; R[u] <= j && j < R[u+1]; {:C[j]:} == v);
+
+inline pure boolean ValidGraph(int N, seq<int> R, seq<int> C) =
+  N >= 0 &&
+  |R| == N + 1 &&
+  (\forall int u; 0 <= u && u < N ==> 0 <= {:R[u]:} && R[u] <= R[u + 1] && R[u + 1] <= |C|) &&
+  (\forall int i; 0 <= i && i < |C| ==> 0 <= {:C[i]:} && C[i] < N)
+  ;
+
+requires ValidGraph(N, R, C);
+decreases;
+pure boolean isAPath(int N, seq<int> R, seq<int> C, seq<int> path)
+{
+    return |path| > 0 &&
+        (\forall int i; 0 <= i && i < |path| ==> 0 <= {:path[i]:} && path[i] < N) &&
+        (\forall int i; 0 <= i && i < |path| - 1 ==> isEdge(R, C, {:path[i]:}, {:path[i + 1]:}));
+}
+
+requires ValidGraph(N, R, C);
+requires 0 <= start && start < N;
+requires 0 <= end && end < N;
+decreases;
+pure boolean pathExists(int N, seq<int> R, seq<int> C, int start, int end)
+{
+  return (start == end) ||
+    (start != end &&
+      (\exists seq<int> path; {:isAPath(N, R, C, path):} && path[0] == start && path[|path| - 1] == end));
+}
+
+// If markTime increases along every edge, then it increases (non-strictly) along every path.
+requires ValidGraph(N, R, C);
+requires markTime != null;
+requires markTime.length == N;
+requires Perm(markTime[*], read);
+requires (\forall int a, int b; 0 <= a && a < N && 0 <= b && b < N && {:isEdge(R, C, a, b):} ==> markTime[a] < markTime[b]);
+requires isAPath(N, R, C, path);
+requires 0 <= i && i < |path|;
+ensures Perm(markTime[*], read);
+ensures markTime[path[0]] <= markTime[path[i]];
+decreases i;
+void PathTimeMonotone(int N, seq<int> R, seq<int> C, int[] markTime, seq<int> path, int i)
+{
+    if(i > 0) {
+        PathTimeMonotone(N, R, C, markTime, path, i - 1);
+        assert isEdge(R, C, path[i - 1], path[i]);
+        assert markTime[path[i - 1]] < markTime[path[i]];
+    }
+}
+
+// If markTime increases along every edge and pathExists(w, u), then markTime[w] <= markTime[u].
+requires ValidGraph(N, R, C);
+requires markTime != null;
+requires markTime.length == N;
+requires Perm(markTime[*], read);
+requires 0 <= w && w < N;
+requires 0 <= u && u < N;
+requires (\forall int a, int b; 0 <= a && a < N && 0 <= b && b < N && {:isEdge(R, C, a, b):} ==> markTime[a] < markTime[b]);
+requires pathExists(N, R, C, w, u);
+ensures Perm(markTime[*], read);
+ensures markTime[w] <= markTime[u];
+decreases;
+void PathImpliesTimeOrder(int N, seq<int> R, seq<int> C, int[] markTime, int w, int u)
+{
+    if(w == u) {
+    } else {
+        seq<int> path;
+        assume isAPath(N, R, C, path) && path[0] == w && path[|path| - 1] == u;
+        PathTimeMonotone(N, R, C, markTime, path, |path| - 1);
+    }
+}
+
+// If markTime increases along every edge, no node u can have isEdge(u, w) && pathExists(w, u): that would
+// force markTime[u] < markTime[w] (edge) and markTime[w] <= markTime[u] (path), a contradiction.
+requires ValidGraph(N, R, C);
+requires markTime != null;
+requires markTime.length == N;
+requires Perm(markTime[*], read);
+requires 0 <= u && u < N;
+requires 0 <= w && w < N;
+requires (\forall int a, int b; 0 <= a && a < N && 0 <= b && b < N && {:isEdge(R, C, a, b):} ==> markTime[a] < markTime[b]);
+requires isEdge(R, C, u, w);
+requires pathExists(N, R, C, w, u);
+ensures false;
+decreases;
+void NoCycleGivenOrder(int N, seq<int> R, seq<int> C, int[] markTime, int u, int w)
+{
+    PathImpliesTimeOrder(N, R, C, markTime, w, u);
+    assert markTime[w] <= markTime[u];
+    assert markTime[u] < markTime[w];
+}
+
+requires ValidGraph(N, R, C);
+decreases;
+boolean bfs(int N, seq<int> R, seq<int> C)
+{
+    int[] is_vis = new int[N];
+    int[] markTime = new int[N];
+    int[] processed = new int[N];
+    int clock = 0;
+
+    int i = 0;
+    loop_invariant Perm(is_vis[*], write);
+    loop_invariant Perm(markTime[*], write);
+    loop_invariant Perm(processed[*], write);
+    loop_invariant 0 <= i && i <= N;
+    loop_invariant (\forall int t; 0 <= t && t < i ==> {:is_vis[t]:} == 0);
+    loop_invariant (\forall int t; 0 <= t && t < i ==> {:processed[t]:} == 0);
+    decreases N - i;
+    while (i < N) {
+        is_vis[i] = 0;
+        processed[i] = 0;
+        i = i + 1;
+    }
+
+    int s = 0;
+    loop_invariant Perm(is_vis[*], write);
+    loop_invariant Perm(markTime[*], write);
+    loop_invariant Perm(processed[*], write);
+    loop_invariant 0 <= s && s <= N;
+    loop_invariant 0 <= clock;
+    loop_invariant (\forall int x; 0 <= x && x < N ==> {:is_vis[x]:} == 0 || is_vis[x] == 1);
+    loop_invariant (\forall int x; 0 <= x && x < s ==> {:is_vis[x]:} == 1);
+    loop_invariant (\forall int x; 0 <= x && x < N && {:is_vis[x]:} == 1 ==> processed[x] == 1);
+    loop_invariant (\forall int x; 0 <= x && x < N && {:processed[x]:} == 1 ==> is_vis[x] == 1);
+    loop_invariant (\forall int x; 0 <= x && x < N && {:is_vis[x]:} == 1 ==> 0 <= markTime[x] && markTime[x] < clock);
+    loop_invariant (\forall int u, int w; 0 <= u && u < N && 0 <= w && w < N && {:processed[u]:} == 1 && {:isEdge(R, C, u, w):} ==> is_vis[w] == 1 && markTime[u] < markTime[w]);
+    decreases N - s;
+    while (s < N) {
+        if (is_vis[s] == 0) {
+            seq<int> queue = seq<int>{s};
+            is_vis[s] = 1;
+            markTime[s] = clock;
+            clock = clock + 1;
+            int ptr = 0;
+
+            loop_invariant Perm(is_vis[*], write);
+            loop_invariant Perm(markTime[*], write);
+            loop_invariant Perm(processed[*], write);
+            loop_invariant 0 <= ptr && ptr <= |queue|;
+            loop_invariant 0 <= clock;
+            loop_invariant (\forall int x; 0 <= x && x < N ==> {:is_vis[x]:} == 0 || is_vis[x] == 1);
+            loop_invariant is_vis[s] == 1;
+            loop_invariant (\forall int x; 0 <= x && x < s ==> {:is_vis[x]:} == 1);
+            loop_invariant |queue| <= N;
+            loop_invariant (\forall int t; 0 <= t && t < |queue|; 0 <= {:queue[t]:} && queue[t] < N);
+            loop_invariant (\forall int t; 0 <= t && t < |queue| ==> is_vis[{:queue[t]:}] == 1);
+            loop_invariant (\forall int t; 0 <= t && t < ptr ==> processed[{:queue[t]:}] == 1);
+            loop_invariant (\forall int x; 0 <= x && x < N && {:is_vis[x]:} == 1 && processed[x] != 1 ==> (\exists int t; ptr <= t && t < |queue| && {:queue[t]:} == x));
+            loop_invariant (\forall int x; 0 <= x && x < N && {:is_vis[x]:} == 1 ==> 0 <= markTime[x] && markTime[x] < clock);
+            loop_invariant (\forall int x; 0 <= x && x < N && {:processed[x]:} == 1 ==> is_vis[x] == 1);
+            loop_invariant (\forall int u, int w; 0 <= u && u < N && 0 <= w && w < N && {:processed[u]:} == 1 && {:isEdge(R, C, u, w):} ==> is_vis[w] == 1 && markTime[u] < markTime[w]);
+            decreases N - ptr;
+            while (ptr < |queue|) {
+                int node = queue[ptr];
+                ptr = ptr + 1;
+
+                int j = R[node];
+                loop_invariant Perm(is_vis[*], write);
+                loop_invariant Perm(markTime[*], write);
+                loop_invariant Perm(processed[*], write);
+                loop_invariant is_vis[node] == 1;
+                loop_invariant 0 <= markTime[node] && markTime[node] < clock;
+                loop_invariant 0 <= ptr - 1 && ptr - 1 < |queue| && queue[ptr - 1] == node;
+                loop_invariant R[node] <= j && j <= R[node + 1];
+                loop_invariant 0 <= ptr && ptr <= |queue|;
+                loop_invariant 0 <= clock;
+                loop_invariant (\forall int x; 0 <= x && x < N ==> {:is_vis[x]:} == 0 || is_vis[x] == 1);
+                loop_invariant is_vis[s] == 1;
+                loop_invariant (\forall int x; 0 <= x && x < s ==> {:is_vis[x]:} == 1);
+                loop_invariant |queue| <= N;
+                loop_invariant (\forall int t; 0 <= t && t < |queue|; 0 <= {:queue[t]:} && queue[t] < N);
+                loop_invariant (\forall int t; 0 <= t && t < |queue| ==> is_vis[{:queue[t]:}] == 1);
+                loop_invariant (\forall int t; 0 <= t && t < ptr - 1 ==> processed[{:queue[t]:}] == 1);
+                loop_invariant (\forall int x; 0 <= x && x < N && {:is_vis[x]:} == 1 && processed[x] != 1 && x != node ==> (\exists int t; ptr <= t && t < |queue| && {:queue[t]:} == x));
+                loop_invariant (\forall int x; 0 <= x && x < N && {:is_vis[x]:} == 1 ==> 0 <= markTime[x] && markTime[x] < clock);
+                loop_invariant (\forall int x; 0 <= x && x < N && {:processed[x]:} == 1 ==> is_vis[x] == 1);
+                loop_invariant (\forall int u, int w; 0 <= u && u < N && 0 <= w && w < N && {:processed[u]:} == 1 && {:isEdge(R, C, u, w):} ==> is_vis[w] == 1 && markTime[u] < markTime[w]);
+                loop_invariant (\forall int jj; R[node] <= jj && jj < j ==> is_vis[{:C[jj]:}] == 1 && markTime[node] < markTime[{:C[jj]:}]);
+                decreases R[node + 1] - j;
+                while (j < R[node + 1]) {
+                    int v = C[j];
+                    if (is_vis[v] == 1) {
+                        return true;
+                    }
+                    is_vis[v] = 1;
+                    markTime[v] = clock;
+                    clock = clock + 1;
+                    queue = queue + [v];
+                    assume |queue| <= N;
+                    j = j + 1;
+                }
+                processed[node] = 1;
+            }
+            assert (\forall int x; 0 <= x && x < N && {:is_vis[x]:} == 1 ==> processed[x] == 1);
+        }
+        s = s + 1;
+    }
+
+    int u0 = 0;
+    loop_invariant Perm(is_vis[*], read);
+    loop_invariant Perm(processed[*], read);
+    loop_invariant Perm(markTime[*], read);
+    loop_invariant 0 <= u0 && u0 <= N;
+    loop_invariant (\forall int x; 0 <= x && x < N ==> {:is_vis[x]:} == 1);
+    loop_invariant (\forall int x; 0 <= x && x < N && {:is_vis[x]:} == 1 ==> processed[x] == 1);
+    loop_invariant (\forall int u, int w; 0 <= u && u < N && 0 <= w && w < N && {:processed[u]:} == 1 && {:isEdge(R, C, u, w):} ==> markTime[u] < markTime[w]);
+    loop_invariant (\forall int uu, int ww; 0 <= uu && uu < u0 && 0 <= ww && ww < N && {:isEdge(R, C, uu, ww):} ==> markTime[uu] < markTime[ww]);
+    decreases N - u0;
+    while (u0 < N) {
+        assert is_vis[u0] == 1;
+        assert processed[u0] == 1;
+        int w0 = 0;
+        loop_invariant Perm(is_vis[*], read);
+        loop_invariant Perm(processed[*], read);
+        loop_invariant Perm(markTime[*], read);
+        loop_invariant (\forall int x; 0 <= x && x < N ==> {:is_vis[x]:} == 1);
+        loop_invariant (\forall int x; 0 <= x && x < N && {:is_vis[x]:} == 1 ==> processed[x] == 1);
+        loop_invariant (\forall int u, int w; 0 <= u && u < N && 0 <= w && w < N && {:processed[u]:} == 1 && {:isEdge(R, C, u, w):} ==> markTime[u] < markTime[w]);
+        loop_invariant 0 <= w0 && w0 <= N;
+        loop_invariant (\forall int ww; 0 <= ww && ww < w0 && {:isEdge(R, C, u0, ww):} ==> markTime[u0] < markTime[ww]);
+        decreases N - w0;
+        while (w0 < N) {
+            if (isEdge(R, C, u0, w0)) {
+                assert markTime[u0] < markTime[w0];
+            }
+            w0 = w0 + 1;
+        }
+        u0 = u0 + 1;
+    }
+    assert (\forall int u, int w; 0 <= u && u < N && 0 <= w && w < N && {:isEdge(R, C, u, w):} ==> markTime[u] < markTime[w]);
+
+    int u = 0;
+    loop_invariant Perm(markTime[*], read);
+    loop_invariant 0 <= u && u <= N;
+    loop_invariant (\forall int a, int b; 0 <= a && a < N && 0 <= b && b < N && {:isEdge(R, C, a, b):} ==> markTime[a] < markTime[b]);
+    loop_invariant (\forall int uu, int ww; 0 <= uu && uu < u && 0 <= ww && ww < N ==> !({:isEdge(R, C, uu, ww):} && {:pathExists(N, R, C, ww, uu):}));
+    decreases N - u;
+    while (u < N) {
+        int w = 0;
+        loop_invariant Perm(markTime[*], read);
+        loop_invariant (\forall int a, int b; 0 <= a && a < N && 0 <= b && b < N && {:isEdge(R, C, a, b):} ==> markTime[a] < markTime[b]);
+        loop_invariant 0 <= w && w <= N;
+        loop_invariant (\forall int ww; 0 <= ww && ww < w ==> !({:isEdge(R, C, u, ww):} && {:pathExists(N, R, C, ww, u):}));
+        decreases N - w;
+        while (w < N) {
+            if (isEdge(R, C, u, w) && pathExists(N, R, C, w, u)) {
+                NoCycleGivenOrder(N, R, C, markTime, u, w);
+            }
+            w = w + 1;
+        }
+        u = u + 1;
+    }
+
+    assert (\forall int uu; 0 <= uu && uu < N ==> !(\exists int w; isEdge(R, C, uu, w) && pathExists(N, R, C, w, uu)));
+    return false;
+}
