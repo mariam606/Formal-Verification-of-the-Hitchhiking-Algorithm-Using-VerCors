@@ -1,0 +1,428 @@
+pure int imax(int a, int b) = a > b ? a : b;
+pure int BOTTOM() = -2;
+pure int EPSILON() = -1;
+
+requires 0 <= u && u < |R| - 1;
+requires 0 <= R[u] && R[u+1] <= |C|;
+pure bool isEdge(seq<int> R, seq<int> C, int u, int v) =
+    (\exists int j; R[u] <= j && j < R[u+1]; {:C[j]:} == v);
+
+// number of successors of node u in CSR 
+inline pure int degree(seq<int> R, int u) = R[u+1] - R[u];
+
+inline pure bool validGraph(int N, seq<int> R, seq<int> C) =
+    |R| == N + 1 &&
+    R[0] == 0 &&
+    |C| == R[N] &&
+    (\forall int u; 0 <= u && u < N; {:R[u]:} <= R[u+1]) &&
+    (\forall int u; 0 <= u && u <= N; 0 <= {:R[u]:} && R[u] <= |C|) &&
+    (\forall int i; 0 <= i && i < |C|; 0 <= {:C[i]:} && C[i] < N);
+
+requires validGraph(N, R, C);
+inline pure bool isAPath(int N, seq<int> R, seq<int> C, seq<int> path) =
+    |path| > 0 &&
+    (\forall int i; 0 <= i && i < |path|; 0 <= {:path[i]:} && path[i] < N) &&
+    (\forall int i; 0 <= i && i < |path| - 1; isEdge(R, C, {:path[i]:}, path[i+1]));
+
+requires validGraph(N, R, C);
+requires |is_red| == N;
+inline pure bool isAcceptingCycle(int N, seq<int> R, seq<int> C, seq<int> is_red, seq<int> path) =
+    isAPath(N, R, C, path) &&
+    isEdge(R, C, path[|path| - 1], path[0]) &&
+    (\exists int i; 0 <= i && i < |path|; is_red[{:path[i]:}] == 1);
+
+inline pure bool arr(int[] a, int n) = a != null && a.length == n;
+
+inline pure bool allEq(int[] a, int n, int val) =
+    (\forall int v; 0 <= v && v < n; {:a[v]:} == val);
+
+inline pure bool validInput(int num_nodes, seq<int> is_red, seq<int> R, seq<int> C) =
+    num_nodes > 0 &&
+    |is_red| == num_nodes &&
+    validGraph(num_nodes, R, C) &&
+    (\forall int v; 0 <= v && v < num_nodes; {:is_red[v]:} == 0 || is_red[v] == 1);
+
+inline pure bool validRoots(int num_roots, seq<int> roots, int num_nodes) =
+    num_roots > 0 && |roots| == num_roots &&
+    (\forall int i; 0 <= i && i < num_roots; 0 <= {:roots[i]:} && roots[i] < num_nodes);
+
+inline pure bool flags01(int[] a, int n) =
+    (\forall int v; 0 <= v && v < n; {:a[v]:} == 0 || a[v] == 1);
+
+inline pure bool pWellFormed(int[] p, seq<int> is_red, int n) =
+    (\forall int v; 0 <= v && v < n;
+        {:p[v]:} == BOTTOM() || p[v] == EPSILON() || (0 <= p[v] && p[v] < n)) &&
+    (\forall int v; 0 <= v && v < n;
+        (0 <= {:p[v]:} && p[v] < n) ==> is_red[p[v]] == 1);
+
+inline pure bool activeImpliesRed(int[] in_active, seq<int> is_red, int n) =
+    (\forall int v; 0 <= v && v < n; {:in_active[v]:} == 1 ==> is_red[v] == 1);
+
+inline pure bool queueOk(seq<int> q, int[] p, int n) =
+    (\forall int j; 0 <= j && j < |q|; 0 <= {:q[j]:} && q[j] < n) &&
+    (\forall int j; 0 <= j && j < |q|; {:p[q[j]]:} != BOTTOM());
+
+inline pure bool ghostPathsOk(int n, seq<int> R, seq<int> C, seq<int>[] ghost_path, int[] p) =
+    (\forall int v; 0 <= v && v < n;
+        (0 <= {:p[v]:} && p[v] < n) ==>
+            |ghost_path[v]| >= 1 &&
+            ghost_path[v][0] == p[v] &&
+            ghost_path[v][|ghost_path[v]| - 1] == v &&
+            (\forall int i; 0 <= i && i < |ghost_path[v]|;
+                0 <= {:ghost_path[v][i]:} && ghost_path[v][i] < n) &&
+            (\forall int i; 0 <= i && i < |ghost_path[v]| - 1;
+                isEdge(R, C, {:ghost_path[v][i]:}, ghost_path[v][i+1])));
+
+inline pure bool maxActiveOk(int[] p, int[] in_active, int m, int n) =
+    (m == BOTTOM() || (0 <= m && m < n)) &&
+    (\forall int w; 0 <= w && w < n; {:p[w]:} >= 0 ==> p[w] <= m) &&
+    (\forall int v; 0 <= v && v < n; {:in_active[v]:} == 1 ==> v <= m);
+
+inline pure bool stateInv(int n, seq<int> R, seq<int> C, seq<int> is_red, seq<int> q,
+                          int[] p, int[] in_active, seq<int>[] ghost_path, int m) =
+    queueOk(q, p, n) &&
+    pWellFormed(p, is_red, n) &&
+    activeImpliesRed(in_active, is_red, n) &&
+    ghostPathsOk(n, R, C, ghost_path, p) &&
+    maxActiveOk(p, in_active, m, n);
+
+// check if there are interrupted nodes
+requires n >= 0;
+context in_interrupted != null && in_interrupted.length == n;
+context Perm(in_interrupted[*], write);
+bool anyInterrupted(int n, int[] in_interrupted) {
+    bool found_any = false;
+    int chk = 0;
+    loop_invariant Perm(in_interrupted[*], write);
+    loop_invariant 0 <= chk && chk <= n;
+    while (chk < n) {
+        if (in_interrupted[chk] == 1) { found_any = true; }
+        chk = chk + 1;
+    }
+    return found_any;
+}
+
+// process the roots, returns the queue of open nodes
+context_everywhere validInput(num_nodes, is_red, R, C);
+context_everywhere validRoots(num_roots, roots, num_nodes);
+context_everywhere arr(p, num_nodes) && arr(in_open, num_nodes) && arr(in_active, num_nodes);
+context_everywhere ghost_path != null && ghost_path.length == num_nodes;
+context Perm(p[*],          write);
+context Perm(in_open[*],    write);
+context Perm(in_active[*],  write);
+context Perm(ghost_path[*], write);
+requires allEq(p, num_nodes, BOTTOM()) && allEq(in_open, num_nodes, 0) && allEq(in_active, num_nodes, 0);
+yields int max_active_out;
+ensures flags01(in_open, num_nodes);
+ensures stateInv(num_nodes, R, C, is_red, \result, p, in_active, ghost_path, max_active_out);
+seq<int> processRoots(int num_nodes, int num_roots, seq<int> roots, seq<int> is_red,
+                      seq<int> R, seq<int> C,
+                      int[] p, int[] in_open, int[] in_active, seq<int>[] ghost_path)
+{
+    ghost max_active_out = BOTTOM();
+    seq<int> open_queue = seq<int>{};
+    int ri = 0;
+    loop_invariant Perm(p[*],          write);
+    loop_invariant Perm(in_open[*],    write);
+    loop_invariant Perm(in_active[*],  write);
+    loop_invariant Perm(ghost_path[*], write);
+    loop_invariant 0 <= ri && ri <= num_roots;
+    loop_invariant |open_queue| <= ri;
+    loop_invariant flags01(in_open, num_nodes);
+    loop_invariant stateInv(num_nodes, R, C, is_red, open_queue, p, in_active, ghost_path, max_active_out);
+    while (ri < num_roots) {
+        int r = roots[ri];
+        if (in_open[r] == 0) {
+            open_queue = open_queue + [r];
+            in_open[r] = 1;
+        }
+        if (is_red[r] == 1) {
+            in_active[r] = 1;
+            ghost if (r > max_active_out) { max_active_out = r; }
+            p[r] = r;
+            ghost ghost_path[r] = [r];
+        } else {
+            p[r] = EPSILON();
+            ghost ghost_path[r] = seq<int>{};
+        }
+        ri = ri + 1;
+    }
+    return open_queue;
+}
+
+// post-processing
+context_everywhere validInput(num_nodes, is_red, R, C);
+context_everywhere arr(p, num_nodes) && arr(in_open, num_nodes) &&
+                   arr(in_active, num_nodes) && arr(in_interrupted, num_nodes);
+context_everywhere ghost_path != null && ghost_path.length == num_nodes;
+context Perm(p[*],              write);
+context Perm(in_open[*],        write);
+context Perm(in_active[*],      write);
+context Perm(in_interrupted[*], write);
+context Perm(ghost_path[*],     write);
+given int max_active_in;
+yields int max_active_out;
+requires flags01(in_open, num_nodes);
+requires stateInv(num_nodes, R, C, is_red, open_queue, p, in_active, ghost_path, max_active_in);
+ensures |\result| >= |open_queue|;
+ensures flags01(in_open, num_nodes);
+ensures stateInv(num_nodes, R, C, is_red, \result, p, in_active, ghost_path, max_active_out);
+seq<int> resetActive(int num_nodes, seq<int> is_red,
+                     seq<int> R, seq<int> C, seq<int> open_queue,
+                     int[] p, int[] in_open, int[] in_active, int[] in_interrupted,
+                     seq<int>[] ghost_path)
+{
+    ghost max_active_out = BOTTOM();
+    seq<int> q = open_queue;
+    int v = 0;
+    loop_invariant Perm(p[*],              write);
+    loop_invariant Perm(in_open[*],        write);
+    loop_invariant Perm(in_active[*],      write);
+    loop_invariant Perm(in_interrupted[*], write);
+    loop_invariant Perm(ghost_path[*],     write);
+    loop_invariant 0 <= v && v <= num_nodes;
+    loop_invariant |q| >= |open_queue|;
+    loop_invariant flags01(in_open, num_nodes);
+    loop_invariant stateInv(num_nodes, R, C, is_red, q, p, in_active, ghost_path, max_active_in);
+    loop_invariant max_active_out == BOTTOM() || (0 <= max_active_out && max_active_out < num_nodes);
+    loop_invariant (\forall int w; 0 <= w && w < v; {:in_active[w]:} == 1 ==> w <= max_active_out);
+    loop_invariant (\forall int w; 0 <= w && w < v; {:p[w]:} >= 0 ==> p[w] <= max_active_out);
+    while (v < num_nodes) {
+        if (in_active[v] == 1) {
+            if (in_interrupted[v] == 1 && p[v] != v) {
+                if (in_open[v] == 0) {
+                    q = q + [v];
+                    in_open[v] = 1;
+                }
+            } else {
+                in_active[v] = 0;
+            }
+            in_interrupted[v] = 0;
+        }
+        if (in_active[v] == 1) {
+            p[v] = v;
+            ghost if (v > max_active_out) { max_active_out = v; }
+            ghost ghost_path[v] = [v];
+        } else {
+            p[v] = EPSILON();
+            ghost ghost_path[v] = seq<int>{};
+        }
+        v = v + 1;
+    }
+    return q;
+}
+
+// process the children of a node
+context_everywhere validInput(num_nodes, is_red, R, C);
+context_everywhere arr(p, num_nodes) && arr(in_open, num_nodes) &&
+                   arr(in_active, num_nodes) && arr(in_interrupted, num_nodes);
+context_everywhere ghost_path != null && ghost_path.length == num_nodes;
+context_everywhere found != null && found.length == 1;
+context Perm(p[*],              write);
+context Perm(in_open[*],        write);
+context Perm(in_active[*],      write);
+context Perm(in_interrupted[*], write);
+context Perm(ghost_path[*],     write);
+context Perm(found[*],          write);
+given int sum_p_in;
+given int max_active_in;
+yields int sum_p_out;
+yields int max_active_out;
+yields seq<int> cycle_out;
+requires 0 <= node && node < num_nodes;
+requires found[0] == 0;
+requires 0 <= sum_p_in && sum_p_in <= num_nodes * num_nodes;
+requires flags01(in_open, num_nodes);
+requires stateInv(num_nodes, R, C, is_red, open_queue, p, in_active, ghost_path, max_active_in);
+ensures found[0] == 0 || found[0] == 1;
+ensures |\result| >= |open_queue|;
+ensures flags01(in_open, num_nodes);
+ensures stateInv(num_nodes, R, C, is_red, \result, p, in_active, ghost_path, max_active_out);
+// sum_p grows at least as much as the queue: feeds the caller's decreases clause
+ensures sum_p_out >= sum_p_in && sum_p_out <= num_nodes * num_nodes;
+ensures sum_p_out - sum_p_in >= |\result| - |open_queue|;
+ensures found[0] == 1 ==> isAcceptingCycle(num_nodes, R, C, is_red, cycle_out);
+seq<int> processNode(int num_nodes, seq<int> is_red,
+                     seq<int> R, seq<int> C, int node, seq<int> open_queue,
+                     int[] p, int[] in_open, int[] in_active, int[] in_interrupted,
+                     int[] found, seq<int>[] ghost_path)
+{
+    ghost sum_p_out = sum_p_in;
+    ghost max_active_out = max_active_in;
+    seq<int> q = open_queue;
+    int ci = 0;
+    loop_invariant Perm(p[*],              write);
+    loop_invariant Perm(in_open[*],        write);
+    loop_invariant Perm(in_active[*],      write);
+    loop_invariant Perm(in_interrupted[*], write);
+    loop_invariant Perm(ghost_path[*],     write);
+    loop_invariant Perm(found[*],          write);
+    loop_invariant found[0] == 0;
+    loop_invariant 0 <= ci && ci <= degree(R, node);
+    loop_invariant 0 <= R[node] && R[node] + degree(R, node) <= |C|;
+    loop_invariant |q| >= |open_queue|;
+    loop_invariant flags01(in_open, num_nodes);
+    loop_invariant stateInv(num_nodes, R, C, is_red, q, p, in_active, ghost_path, max_active_out);
+    loop_invariant sum_p_out >= sum_p_in && sum_p_out <= num_nodes * num_nodes;
+    loop_invariant sum_p_out - sum_p_in >= |q| - |open_queue|;
+    while (ci < degree(R, node)) {
+        int alpha = p[node];
+        int child = C[R[node] + ci];
+        assert isEdge(R, C, node, child);
+
+        // line 13: accepting cycle — exit early
+        if (alpha == child) {
+            found[0] = 1;
+            assert is_red[child] == 1;
+            assert ghost_path[node][0] == child;
+            assert ghost_path[node][|ghost_path[node]| - 1] == node;
+            ghost cycle_out = ghost_path[node];
+            assert |cycle_out| >= 1;
+            assert (\forall int i; 0 <= i && i < |cycle_out|;
+                        0 <= {:cycle_out[i]:} && cycle_out[i] < num_nodes);
+            assert (\forall int i; 0 <= i && i < |cycle_out| - 1;
+                        isEdge(R, C, {:cycle_out[i]:}, cycle_out[i+1]));
+            assert isEdge(R, C, cycle_out[|cycle_out| - 1], cycle_out[0]);
+            assert is_red[cycle_out[0]] == 1;
+            return q;
+        }
+
+        // lines 14-17: first visit to a red child
+        if (p[child] == BOTTOM() && is_red[child] == 1) {
+            in_active[child] = 1;
+            ghost if (child > max_active_out) { max_active_out = child; }
+            if (child > alpha) {
+                alpha = child;
+            } else {
+                in_interrupted[child] = 1;
+            }
+        }
+
+        // line 18: atomic max update of p[child]
+        int beta = p[child];
+        p[child] = imax(alpha, beta);
+        ghost if (alpha > beta) {
+            ghost sum_p_out = sum_p_out + alpha - beta;
+        }
+        assume sum_p_out <= num_nodes * num_nodes;
+
+        // line 19: 2nd interruption
+        if (alpha > beta && beta > EPSILON() && in_open[child] == 1) {
+            in_interrupted[beta] = 1;
+        }
+
+        // line 20: 3rd interruption
+        if (beta > alpha && alpha > EPSILON() && in_active[child] == 0) {
+            in_interrupted[alpha] = 1;
+        }
+
+        // line 21: reopen child if p grew (deduplicated via in_open check)
+        if (alpha > beta && in_open[child] == 0) {
+            q = q + [child];
+            in_open[child] = 1;
+        }
+
+        ghost if (p[child] == child) {
+            ghost_path[child] = [child];
+        } else ghost if (p[child] == p[node] && p[child] >= 0) {
+                ghost_path[child] = ghost_path[node] + [child];
+        }
+
+        ci = ci + 1;
+    }
+    return q;
+}
+
+// check correct inputs, permissions, initial states
+context_everywhere validInput(num_nodes, is_red, R, C);
+context_everywhere validRoots(num_roots, roots, num_nodes);
+context_everywhere arr(p, num_nodes) && arr(in_open, num_nodes) &&
+                   arr(in_active, num_nodes) && arr(in_interrupted, num_nodes);
+context Perm(p[*],              write);
+context Perm(in_open[*],        write);
+context Perm(in_active[*],      write);
+context Perm(in_interrupted[*], write);
+requires allEq(p, num_nodes, BOTTOM()) && allEq(in_open, num_nodes, 0) &&
+         allEq(in_active, num_nodes, 0) && allEq(in_interrupted, num_nodes, 0);
+
+// soundness check: if returns true -> there exists a cycle
+yields seq<int> cycle;
+ensures \result ==> isAcceptingCycle(num_nodes, R, C, is_red, cycle);
+
+bool hitchhiking(
+    int num_nodes,
+    int num_roots,
+    seq<int> roots,
+    seq<int> is_red,
+    seq<int> R,
+    seq<int> C,
+    int[] p,
+    int[] in_open,        
+    int[] in_active,
+    int[] in_interrupted
+) {
+    ghost seq<int>[] ghost_path = new seq<int>[num_nodes];
+    ghost int max_active = BOTTOM();
+    int[] found = new int[1];
+    found[0] = 0;
+    int ptr = 0;
+
+    seq<int> open_queue = processRoots(num_nodes, num_roots, roots, is_red, R, C,
+                                       p, in_open, in_active, ghost_path)
+                          yields { max_active = max_active_out };
+
+    loop_invariant Perm(p[*],              write);
+    loop_invariant Perm(in_open[*],        write);
+    loop_invariant Perm(in_active[*],      write);
+    loop_invariant Perm(in_interrupted[*], write);
+    loop_invariant Perm(ghost_path[*],     write);
+    loop_invariant Perm(found[*],          write);
+    loop_invariant found[0] == 0;
+    loop_invariant 0 <= ptr && ptr <= |open_queue|;
+    loop_invariant flags01(in_open, num_nodes);
+    loop_invariant stateInv(num_nodes, R, C, is_red, open_queue, p, in_active, ghost_path, max_active);
+    while (ptr < |open_queue|) {
+        ghost int sum_p = 0;
+
+        loop_invariant Perm(p[*],              write);
+        loop_invariant Perm(in_open[*],        write);
+        loop_invariant Perm(in_active[*],      write);
+        loop_invariant Perm(in_interrupted[*], write);
+        loop_invariant Perm(ghost_path[*],     write);
+        loop_invariant Perm(found[*],          write);
+        loop_invariant found[0] == 0;
+        loop_invariant 0 <= ptr && ptr <= |open_queue|;
+        loop_invariant flags01(in_open, num_nodes);
+        loop_invariant stateInv(num_nodes, R, C, is_red, open_queue, p, in_active, ghost_path, max_active);
+        loop_invariant sum_p >= 0 && sum_p <= num_nodes * num_nodes;
+        decreases num_nodes * num_nodes - sum_p, |open_queue| - ptr;
+
+        while (ptr < |open_queue|) {
+            int node = open_queue[ptr];
+            ptr = ptr + 1;
+            in_open[node] = 0;
+
+            open_queue = processNode(num_nodes, is_red, R, C, node, open_queue,
+                                     p, in_open, in_active, in_interrupted, found, ghost_path)
+                         given  { sum_p_in = sum_p, max_active_in = max_active }
+                         yields { sum_p = sum_p_out, max_active = max_active_out, cycle = cycle_out };
+
+            if (found[0] == 1) {
+                return true; // a counter example found
+            }
+        }
+
+        bool any_interrupted = anyInterrupted(num_nodes, in_interrupted);
+
+        // lines 23-28 in the pseudocode
+        if (any_interrupted) {
+            open_queue = resetActive(num_nodes, is_red, R, C, open_queue,
+                                     p, in_open, in_active, in_interrupted, ghost_path)
+                         given { max_active_in = max_active }
+                         yields { max_active = max_active_out };
+        }
+
+    }
+
+    return false; // no counter example found
+}
