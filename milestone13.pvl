@@ -412,6 +412,10 @@ bool hitchhiking(
             }
         }
 
+        // assert for all 0 <= u < num_nodes; pathExists(max_active,  u) => p[u] = max_active
+        // assert for all 0 <= u < num_nodes; p[u] = max_active => !hasEdge(u, max_active) OR
+        // assert for all 0 <= u < num_nodes; p[u] = max_active => !isAcceptingCycle(N, R, C, is_red, ghost_path[u]);
+
         bool any_interrupted = anyInterrupted(num_nodes, in_interrupted);
 
         // lines 23-28 in the pseudocode
