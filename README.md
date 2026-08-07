@@ -361,26 +361,24 @@ void lemma_prefixSum_update(seq<int> xs, int idx, int v, int k, int n) {
 ```
 `prefixSum` is the formal potential: the sum of `xs[i] - BOTTOM()` over the first `k` slots, shifted so a slot still at `BOTTOM()` contributes `0`. Its own `ensures` gives the bound for free. `lemma_prefixSum_update` proves the one fact VerCors cannot derive automatically: that overwriting a single slot shifts this recursive sum by exactly that slot's delta. VerCors does not unfold a recursive definition more than one level on its own, so this has to be proved by explicit induction, recursing in lockstep with `prefixSum`'s own recursion so each step only needs one level of unfolding.
 
-**Base-case machinery — `allBottomSeq`, `lemma_prefixSum_congruent`, `lemma_allBottom_sum_zero`:**
+**Base-case machinery — `allBottomSeq`, `lemma_allBottom_sum_zero`:**
 ```pvl
 pure seq<int> allBottomSeq(int n) =
     n == 0 ? seq<int>{} : allBottomSeq(n - 1) + seq<int>{BOTTOM()};
 
-ensures prefixSum(xs, k, n) == prefixSum(ys, k, n);   // when xs, ys agree on their first k elements
-void lemma_prefixSum_congruent(seq<int> xs, seq<int> ys, int k, int n) { ... }
-
-requires 0 <= m && m <= n;
-ensures prefixSum(allBottomSeq(m), m, n) == 0;
-decreases m;
-void lemma_allBottom_sum_zero(int m, int n) {
-    if (m == 0) {
+requires 0 <= k && k <= n;
+requires |seq_x| == n;
+requires (\forall int i; 0 <= i && i < n; seq_x[i] == BOTTOM());
+ensures prefixSum(seq_x, k, n) == 0;
+decreases k;
+void lemma_allBottom_sum_zero(seq<int> seq_x, int k, int n) {
+    if (k == 0) {
     } else {
-        lemma_allBottom_sum_zero(m - 1, n);
-        lemma_prefixSum_congruent(allBottomSeq(m), allBottomSeq(m - 1), m - 1, n);
+        lemma_allBottom_sum_zero(seq_x, k - 1, n);
     }
 }
 ```
-Before any node is discovered, `p[]` is all `BOTTOM()`, and the potential should start at `0` — but `prefixSum(allBottomSeq(num_nodes), ...) == 0` needs its own induction, chaining two recursive definitions together. `lemma_allBottom_sum_zero` proves it. It deliberately keeps `m` (the shrinking recursion variable) separate from `n` (the fixed range cap `prefixSum` needs): recursing on a single shared parameter would leave the induction hypothesis talking about `prefixSum(allBottomSeq(m-1), m-1, m-1)` instead of the needed `prefixSum(allBottomSeq(m-1), m-1, n)` — same value, but a different term to the verifier. `lemma_prefixSum_congruent` (agreeing sequences on a prefix ⟹ agreeing prefix sums) is the bridge that transfers the induction hypothesis, proved about `allBottomSeq(m-1)`, onto the first `m-1` slots of the longer `allBottomSeq(m)`.
+Before any node is discovered, `p[]` is all `BOTTOM()`, and the potential should start at `0` — but `prefixSum(allBottomSeq(num_nodes), ...) == 0` needs its own induction. `lemma_allBottom_sum_zero` proves it directly by recursing on `k` over a single fixed sequence `seq_x`: the `k`-th step of `prefixSum`'s own recursion needs `seq_x[k-1] == BOTTOM()`, which comes straight from the lemma's own `forall` precondition, so no comparison between differently-shaped sequences is ever required. (An earlier version of this lemma instead recursed on the *length* `m` of `allBottomSeq(m)`, which meant relating `prefixSum` over `allBottomSeq(m)` and `allBottomSeq(m-1)` — two different-length sequences agreeing only on a prefix — and needed a second lemma, `lemma_prefixSum_congruent`, just to bridge that gap. Fixing the sequence and inducting on `k` instead sidesteps the need for that bridge lemma entirely.)
 
 **Ghost mirror `p_seq`, threaded via `given`/`yields`.** `prefixSum` needs an *immutable* value to recurse over when comparing "before" and "after" a write — an `int[]` array can't serve that role, since once `p[child]` is overwritten, its old content is simply gone (there's no persistent second copy of the array to compare against). So every method that writes `p[]` — `processRoots`, `processNode`, `resetActive` — now also carries a ghost `seq<int> p_seq` that mirrors `p[]` value-for-value, plus `sum_p`/`sum_p_out` defined to literally equal `prefixSum(p_seq, num_nodes, num_nodes)` (not just bounded by it). At every real write, the pattern is:
 ```pvl
