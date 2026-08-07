@@ -33,27 +33,15 @@ decreases n;
 pure seq<int> allBottomSeq(int n) =
     n == 0 ? seq<int>{} : allBottomSeq(n - 1) + seq<int>{BOTTOM()};
 
-requires 0 <= k && k <= |xs| && k <= |ys|;
-requires (\forall int i; 0 <= i && i < k; xs[i] == ys[i]);
-requires (\forall int i; 0 <= i && i < |xs|; BOTTOM() <= xs[i] && xs[i] < n);
-requires (\forall int i; 0 <= i && i < |ys|; BOTTOM() <= ys[i] && ys[i] < n);
-ensures prefixSum(xs, k, n) == prefixSum(ys, k, n);
+requires 0 <= k && k <= n;
+requires |seq_x| == n;
+requires (\forall int i; 0 <= i && i < n; seq_x[i] == BOTTOM());
+ensures prefixSum(seq_x, k, n) == 0;
 decreases k;
-void lemma_prefixSum_congruent(seq<int> xs, seq<int> ys, int k, int n) {
+void lemma_allBottom_sum_zero(seq<int> seq_x, int k, int n) {
     if (k == 0) {
     } else {
-        lemma_prefixSum_congruent(xs, ys, k - 1, n);
-    }
-}
-
-requires 0 <= m && m <= n;
-ensures prefixSum(allBottomSeq(m), m, n) == 0;
-decreases m;
-void lemma_allBottom_sum_zero(int m, int n) {
-    if (m == 0) {
-    } else {
-        lemma_allBottom_sum_zero(m - 1, n);
-        lemma_prefixSum_congruent(allBottomSeq(m), allBottomSeq(m - 1), m - 1, n);
+        lemma_allBottom_sum_zero(seq_x, k - 1, n);
     }
 }
 
@@ -183,7 +171,7 @@ seq<int> processRoots(int num_nodes, int num_roots, seq<int> roots, seq<int> is_
 {
     ghost max_active_out = BOTTOM();
     ghost p_seq_out = allBottomSeq(num_nodes);
-    lemma_allBottom_sum_zero(num_nodes, num_nodes);
+    lemma_allBottom_sum_zero(p_seq_out, num_nodes, num_nodes);
     ghost sum_p_out = 0;
     seq<int> open_queue = seq<int>{};
     int ri = 0;
