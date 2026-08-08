@@ -42,6 +42,7 @@ Special values for `p[v]`:
 ├── milestone12.pvl      # Lemma 4 sub-properties: max_active is never interrupted; p[max_active] == max_active
 ├── milestone13.pvl      # Refactor: pure predicate bundles + decomposed helper functions (processRoots, resetActive, processNode)
 ├── milestone14.pvl      # Lemma 1 termination proof completed: sum_p assume replaced by a real potential-function proof
+├── milestone15.pvl      # Explicit decreases clauses added to every remaining while loop
 └── README.md
 ```
 
@@ -393,6 +394,19 @@ The lemma hands VerCors the exact relation between the old and new potential, wh
 **`resetActive` also writes `p[]`.** Tracing through the proof surfaced that `resetActive`'s reset loop (lines 22–28 of the algorithm) unconditionally sets `p[v] = v` or `p[v] = EPSILON()` on every node — a real change to `p[]`, not a no-op — so it needed the identical `p_seq`/`sum_p` treatment as `processRoots` and `processNode`. Unlike those two, `resetActive`'s update is not monotonic (`p[v]` can move down as well as up), which is fine: `lemma_prefixSum_update` proves an exact equality regardless of direction, and a shrinking `sum_p` only makes its upper bound easier to satisfy.
 
 **Per-epoch potential reset removed.** Milestone 8 reset `ghost int sum_p = 0;` at the top of every outer-loop iteration, treating `sum_p` as "growth since this round started." That stops making sense once `sum_p` is defined to literally equal the current `prefixSum(p_seq, ...)` — resetting it to `0` while `p[]` still holds everything accumulated from earlier rounds would falsify the invariant outright. `sum_p` is now declared once, right after `processRoots` runs, and carried for the whole method without ever resetting.
+
+### Milestone 15 — Explicit `decreases` on every loop (`milestone15.pvl`)
+
+Builds on milestone14's real potential-function proof and adds an explicit `decreases` clause to each of the four remaining `while` loops that didn't already have one (the outer `hitchhiking` drain loop has carried its two-measure `decreases` since milestone 8):
+
+```pvl
+decreases n - chk;               // anyInterrupted
+decreases num_roots - ri;        // processRoots
+decreases num_nodes - v;         // resetActive
+decreases degree(R, node) - ci;  // processNode
+```
+
+Each is a plain counting loop bounded by an invariant already in scope (`0 <= chk && chk <= n`, etc.), so the measure is just "loop variable to bound." Without an explicit clause VerCors does not attempt to prove these loops terminate at all; adding one closes that gap for the whole file, so every loop's termination is now proven rather than assumed.
 
 ## Running the Verifier
 
