@@ -408,6 +408,59 @@ decreases degree(R, node) - ci;  // processNode
 
 Each is a plain counting loop bounded by an invariant already in scope (`0 <= chk && chk <= n`, etc.), so the measure is just "loop variable to bound." Without an explicit clause VerCors does not attempt to prove these loops terminate at all; adding one closes that gap for the whole file, so every loop's termination is now proven rather than assumed.
 
+### Milestone 16 — Outer-loop termination: `decreases max_active_end_round` (`hitchhiking.pvl`)
+
+Since milestone 8, the outer `while (ptr < |open_queue|)` loop in `hitchhiking` carried `decreases max_active_end_round - BOTTOM();`, but this was never actually proven to *decrease* across rounds — only that the measure stays non-negative. This milestone closes that gap with a real proof and no `assume`. No separate snapshot file: the change was applied directly to `hitchhiking.pvl`, which is already the final/current file.
+
+**Key structural fact: `resetActive` touches every node, not just active ones.** Algorithm 2 in the paper (lines 22–28) reads `forall q̄ ∈ Q⊗ do in parallel` at the *outer* level of the post-processing block — the whole state space, not just `A`. `resetActive`'s sweep mirrors this exactly: every index `v` from `0` to `num_nodes - 1` gets `p[v] = v` (if still active) or `p[v] = EPSILON()` (otherwise), unconditionally. So after *any* call to `resetActive`, `p[v] != BOTTOM()` holds for every `v`, including nodes that were never reachable at all.
+
+**Why that's the whole termination argument.** Activation (`in_active[child] = 1`) only ever fires when `p[child] == BOTTOM()` (first visit). Once a reset has happened even once, `p` is non-`BOTTOM()` everywhere and stays that way (nothing in the algorithm ever writes `BOTTOM()` back into `p`), so the activation guard can never fire again — `max_active` can only stay flat within a round or strictly decrease via a further reset. This is proven as two new facts on `processNode`:
+```pvl
+// monotonicity: p never regresses to BOTTOM()
+ensures (\forall int w; 0 <= w && w < num_nodes; \old(p[w]) != BOTTOM() ==> {:p[w]:} != BOTTOM());
+// no new activation: if every node was already visited on entry, max_active can't move
+ensures (\forall int w; 0 <= w && w < num_nodes; \old(p[w]) != BOTTOM()) ==> max_active_out == max_active_in;
+```
+and one on `resetActive` (`ensures (\forall int v; ...; {:p[v]:} != BOTTOM());`), on top of the strict decrease it already provided (`max_active_out < max_active_in`, given `max_active_in != BOTTOM()`).
+
+**Ghost scaffolding in `hitchhiking`:**
+```pvl
+ghost bool reset_happened = false;
+ghost int max_active_after_reset = BOTTOM();
+```
+`reset_happened` flips true the first time `resetActive` actually runs and never flips back; `max_active_after_reset` snapshots `max_active` right after each reset. Two invariants tie these together with the outer loop's own measure — **guarded by the loop condition itself**, not stated unconditionally:
+```pvl
+loop_invariant (ptr < |open_queue| && reset_happened) ==> max_active_after_reset < max_active_end_round;
+loop_invariant (ptr < |open_queue| && !reset_happened) ==> max_active_end_round == num_nodes;
+```
+The guard matters: on the round where the loop is about to exit for good (no new interruptions found), `max_active_end_round` legitimately becomes *equal to* `max_active_after_reset`, not strictly less — true and harmless for termination (there's no next round to compare against), but false as an *unconditional* claim. Loop-invariant maintenance in Hoare logic must hold even on the exiting iteration, so an unconditional version of either invariant is a real defect, not just hard to prove; gating both on `ptr < |open_queue|` (the loop's own guard) makes them vacuously true exactly when that iteration is the last one.
+
+**Missing `flags01` was a real, separate gap.** While building this, `in_active` and `in_interrupted` turned out to have never been constrained to `{0, 1}` anywhere in the file (only `in_open` had `flags01` from the start) — every function's requires/ensures/loop_invariant needed `flags01(in_active, num_nodes)` and `flags01(in_interrupted, num_nodes)` added alongside the existing `flags01(in_open, num_nodes)`. Without it, VerCors could only conclude "not equal to 1" from a failed comparison, never "equal to 0", which silently broke several unrelated-looking proof steps until diagnosed.
+
+### Milestone 17 — Lemma 5: the max-active node is never interrupted (`hitchhiking.pvl`)
+
+Removes the last `assume` in the file:
+```pvl
+assume in_interrupted[max_active_end_round] == 0;
+```
+which stood in for **Lemma 5** from the paper (page 32): *at the post-processing point, `q̄_max ∉ F`* — the state with the highest active ID is never in the interrupted set. It's now a proven `assert` of the same fact.
+
+**Proof, by ruling out all three interruption sites in `processNode` using the already-proven `maxActiveOk`** (`in_active[v]==1 ==> v<=max`, `p[w]>=0 ==> p[w]<=max`):
+- **Site 2** (`in_interrupted[beta] = 1`, guarded by `alpha > beta`): if `beta == max_active`, this needs `alpha > max_active` — impossible, since `alpha = p[node] <= max_active` always.
+- **Site 3** (`in_interrupted[alpha] = 1`, guarded by `beta > alpha`): symmetric — `beta = p[child] <= max_active` always, so `beta > max_active` can't happen.
+- **Site 1** (interrupts a freshly-activated `child`): the ghost `max_active_out` update happens *before* the `child > alpha` check, so whenever `child` is the one becoming the new max, it is automatically `>` the old (bounded) `alpha` — it always takes the "become the new leading claim" branch, never the interrupt branch.
+
+**Formalized as one new invariant, threaded through the usual places:**
+```pvl
+// on processNode (requires uses max_active_in, ensures/loop_invariant use max_active_out)
+ensures max_active_out == BOTTOM() || (0 <= max_active_out && max_active_out < num_nodes && in_interrupted[max_active_out] == 0);
+// on hitchhiking's outer + inner loops
+loop_invariant max_active == BOTTOM() || (0 <= max_active && max_active < num_nodes && in_interrupted[max_active] == 0);
+```
+**Well-definedness gotcha:** the naive form `X == BOTTOM() || in_interrupted[X] == 0` fails with "index may be negative" — the disjunction alone doesn't hand the array-access check an upper bound on `X` before evaluating it, even though `maxActiveOk` guarantees one elsewhere in the invariant set. The fix is the same pattern as the `p[w] >= 0 ==> in_active[p[w]] == 1` invariant from milestone 16: spell out `0 <= X && X < num_nodes` explicitly in the same clause rather than relying on a separate fact to supply it.
+
+With `in_interrupted[max_active] == 0` now proven rather than assumed, `resetActive`'s precondition (`max_active_in == BOTTOM() || in_interrupted[max_active_in] == 0`) is satisfied at its call site by a real `assert`, and `hitchhiking.pvl` verifies end to end with zero `assume`s remaining anywhere in the file.
+
 ## Running the Verifier
 
 To verify any milestone with VerCors:
