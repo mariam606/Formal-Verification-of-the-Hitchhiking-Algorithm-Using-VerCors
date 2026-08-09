@@ -43,6 +43,8 @@ Special values for `p[v]`:
 ├── milestone13.pvl      # Refactor: pure predicate bundles + decomposed helper functions (processRoots, resetActive, processNode)
 ├── milestone14.pvl      # Lemma 1 termination proof completed: sum_p assume replaced by a real potential-function proof
 ├── milestone15.pvl      # Explicit decreases clauses added to every remaining while loop
+├── milestone16.pvl      # Outer-loop termination proof: decreases max_active_end_round
+├── milestone17.pvl      # Lemma 5: max-active node is never interrupted (last assume removed)
 └── README.md
 ```
 
